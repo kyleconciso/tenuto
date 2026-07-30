@@ -1,0 +1,27 @@
+# Python / Cache
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.Python
+env/
+venv/
+ENV/
+
+# Jupyter / Colab
+.ipynb_checkpoints/
+*.ipynb_checkpoints
+
+# Datasets and Weights
+data/
+datasets/
+checkpoints/
+runs/
+*.pth
+*.pt
+*.onnx
+
+# IDE / OS
+.vscode/
+.idea/
+.DS_Store

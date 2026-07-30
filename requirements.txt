@@ -1,0 +1,11 @@
+torch
+torchvision
+torchaudio
+partitura
+mido
+numpy
+scipy
+tqdm
+matplotlib
+pillow
+scikit-learn

@@ -1,0 +1,132 @@
+
+# Expressive Score-to-Performance AI Engine (`PLAN.md`)
+
+## 1. Project Overview & Philosophy
+
+### Core Problem
+
+Traditional Sequence-to-Sequence (Seq2Seq) models generate performance events autoregressively. While expressive, they require thousands of sequential forward passes during inference, taking seconds to render and running the risk of **compounding timing drift** over multi-minute scores.
+
+### Solution
+
+Instead of letting the network predict absolute event timestamps from scratch, our model operates as a **non-autoregressive expression layer** over an unshakeable score grid:
+
+$$\text{Time}_{\text{played}}(i) = \left[ \text{BeatTime}(b_i) \times S(b_i) \right] + \Delta t_i$$
+
+* **100% Grid Stability:** Anchored strictly to the score timeline (zero phase collapse or drift).
+* **Parallel Execution:** 1 single forward pass across all $N$ notes ($\sim 10\text{--}50\text{ms}$ total execution time for an 8-minute piece).
+* **Ultra-Lightweight:** $\sim 5\text{M}\text{--}15\text{M}$ parameters (runs on CPU, mobile, or as a real-time DAW plugin).
+
+---
+
+## 2. System Architecture & Execution Flow
+
+```
+                                [ MusicXML / Score File ]
+                                            │
+                                            ▼
+┌─────────────────────────────────────────────────────────────────────────────────────────┐
+│ FEATURE EXTRACTION PIPELINE (via `partitura.musicanalysis`)                             │
+│ • Build Note Feature Matrix X ∈ ℝ^(N × 40) (Pitch, Metrics, Score Markings, Polyphony)  │
+│ • Lock Unshakeable Score Grid T_score ∈ ℝ^(N)                                            │
+└───────────────────────────┬─────────────────────────────────────────────────────────────┘
+                                            │
+                                            ▼
+┌─────────────────────────────────────────────────────────────────────────────────────────┐
+│ CONFORMER / TRANSFORMER BACKBONE (Bidirectional Context Reader)                         │
+│ • ~5M–15M Parameters | Hidden Dim = 256 | 6–8 Encoder Layers                            │
+│ • Bounded Sliding Window (8–16 measures lookahead / lookbehind)                         │
+└───────────────────────────┬─────────────────────────────────────────────────────────────┘
+                                            │
+                                            ▼
+┌─────────────────────────────────────────────────────────────────────────────────────────┐
+│ MULTI-HEAD PARALLEL PREDICTOR (1-Pass Non-Autoregressive Output)                        │
+│ ├── Head 1: Beat Tempo Scale S(b)          ── Macro Rubato Curve (0.5x to 1.5x)         │
+│ ├── Head 2: Dynamic Baseline V(b)          ── Macro Dynamic Swell                        │
+│ ├── Head 3: Micro Timing Shift Δt_i        ── Finger Asynchrony / Voicing (±25ms)        │
+│ ├── Head 4: Velocity Offset Δv_i           ── Per-Note Dynamic Weighting (0 to 127)      │
+│ ├── Head 5: Articulation Scale d_i         ── Key Release Multiplier (Staccato/Legato)   │
+│ └── Head 6: Continuous Pedal State         ── Sustain Pedal CC64 Curves                 │
+└───────────────────────────┬─────────────────────────────────────────────────────────────┘
+                                            │
+                                            ▼
+┌─────────────────────────────────────────────────────────────────────────────────────────┐
+│ POST-PROCESSING & DAW EXPORT                                                            │
+│ • Smooth S(b) via Gaussian/Spline Filter to eliminate jitter                            │
+│ • Expressive Tempo Mapping: Converts absolute ms offsets into an editable DAW tempo map │
+│ • Export Expressive MIDI with dynamic tempo track                                       │
+└─────────────────────────────────────────────────────────────────────────────────────────┘
+
+```
+
+---
+
+## 3. Note Feature Vector Schema ($\mathbf{x}_i \in \mathbb{R}^{40}$)
+
+Extracted automatically using `partitura.musicanalysis.make_note_features()`:
+
+| Category | Feature Name | Dim | Range / Format | Description |
+| --- | --- | --- | --- | --- |
+| **Pitch & Harmony** | `midi_pitch` | 1 | $[0.0, 1.0]$ | Pitch number normalized ($0\text{--}127 \div 127$). |
+|  | `pitch_class` | 12 | One-hot | Note identity ($C, C\sharp, D...$). |
+|  | `interval_from_root` | 1 | $[0.0, 1.0]$ | Distance from active chord root (dissonances get agogic delays). |
+|  | `melodic_leap` | 1 | Signed float | Step size from previous note in the same voice line. |
+| **Metric Grid** | `nominal_duration` | 1 | Float | Score length in beats (e.g., $0.25 =$ 16th note). |
+|  | `beat_position` | 1 | $[0.0, 1.0)$ | Normalized position within current measure. |
+|  | `metric_weight` | 4 | One-hot | Downbeat ($1$), mid-measure ($2$), weak beat ($3, 4$). |
+|  | `score_tempo` | 1 | Normalized | Written BPM in score. |
+| **Score Markings** | `dynamic_marking` | 8 | One-hot | Written dynamics ($ppp$ to $fff$). |
+|  | `hairpin_slope` | 1 | $[-1.0, 1.0]$ | Crescendo ($>0$) vs. Diminuendo ($<0$) slope. |
+|  | `articulation_flags` | 4 | Binary | *Staccato, tenuto, accent, fermata*. |
+| **Polyphony & Voice** | `is_top_melody` | 1 | Binary | $1$ if highest pitch in chord cluster (receives velocity boost). |
+|  | `is_bass_note` | 1 | Binary | $1$ if lowest pitch in chord cluster. |
+|  | `chord_density` | 1 | Float | Number of simultaneous sounding notes. |
+|  | `staff_id` | 2 | Binary | Right Hand vs. Left Hand staff. |
+
+---
+
+## 4. Target Features ($Y$): "The 4 Performance Parameters Learned"
+
+Derived from score-performance alignment files (`.match`) using `partitura.musicanalysis`:
+
+$$\mathbf{y}_i = \left[ \Delta t_i, \; v_i, \; d_i, \; \text{pedal}_i \right]$$
+
+1. **Micro-Timing Shift ($\Delta t_i$):** $\text{Played Time} - \text{Beat Grid Time}$ bounded to $\pm 25\text{ms}$ (`tanh`).
+2. **Note Velocity ($v_i$):** Target MIDI velocity ($0\text{--}127$) using `sigmoid`.
+3. **Articulation Scale ($d_i$):** Key-release ratio $\frac{\text{Played Duration}}{\text{Score Duration}}$ using `softplus`.
+4. **Sustain Pedal ($\text{pedal}_i$):** Continuous pedal state ($\text{CC}64$) mapped to $[0, 127]$.
+
+---
+
+## 5. Loss Functions & Training Setup
+
+$$\mathcal{L}_{\text{total}} = 100 \cdot \mathcal{L}_{\text{huber}}(\Delta t) + 1.0 \cdot \mathcal{L}_{\text{mse}}(v) + 10.0 \cdot \mathcal{L}_{\text{smooth}}(S_b)$$
+
+* **Micro-Timing Loss ($\mathcal{L}_{\text{huber}}$):** Huber loss on $\Delta t$ to remain robust against extreme human timing outliers.
+* **Velocity Loss ($\mathcal{L}_{\text{mse}}$):** Mean Squared Error on per-note MIDI velocities.
+* **Smoothness Regularization ($\mathcal{L}_{\text{smooth}}$):** Second-order difference penalty on macro beat scaling to ensure human-like, continuous tempo transitions:
+
+$$\mathcal{L}_{\text{smooth}} = \sum_b \left\vert{} (S_{b+1} - S_b) - (S_b - S_{b-1}) \right\vert{}^2$$
+
+
+
+---
+
+## 6. Implementation Strategy & Roadmap
+
+### Milestone 1: Simplified 10D Prototype (Day 1 Sprint)
+
+* Use pre-aligned note pairs from the `asap-dataset` repository.
+* Extract a 10D feature vector (`Pitch`, `Duration`, `Beat Position`, `Is Downbeat`, `Is Top Pitch`).
+* Train a lightweight 2-layer Bidirectional GRU ($\sim 1\text{M}$ parameters) predicting velocity $v$ and timing shift $\Delta t$ to verify the pipeline end-to-end.
+
+### Milestone 2: Full 40D Feature Pipeline (Week 1–2)
+
+* Integrate `partitura` for automated 40D feature extraction (`make_note_features`) and target calculation (`asynchrony_feature`, `dynamics_feature`, `articulation_feature`).
+* Build PyTorch `Dataset` and `DataLoader` supporting note-chunking (256-note sequences with 50% overlap).
+
+### Milestone 3: Transformer Backbone & Fine-Tuning (Week 3–4)
+
+* Implement 6-layer Transformer/Conformer Encoder with multi-head output bounded non-linearities (`tanh`, `sigmoid`, `softplus`).
+* Train on the ASAP dataset with AdamW optimizer and gradient clipping.
+* Export trained model to **ONNX / CoreML** for sub-50ms CPU execution.
