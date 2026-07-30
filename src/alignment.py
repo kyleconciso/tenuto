@@ -1,10 +1,10 @@
 import numpy as np
 import torch
 
-def compute_alignment_targets(score_note_array, performance_note_array=None):
+def compute_alignment_targets(score_path_or_array=None, perf_path_or_array=None):
     r"""
     Derives ground-truth target features Y = [\Delta t_i, v_i, d_i, pedal_i, S(b)]
-    from aligned score & performance note arrays.
+    from aligned score & performance files or note arrays using partitura.
     
     Target Schema:
     --------------
@@ -14,22 +14,53 @@ def compute_alignment_targets(score_note_array, performance_note_array=None):
     4. Sustain Pedal (pedal_i): Continuous CC64 pedal values [0, 127]
     5. Beat Tempo Scale S(b): Macro rubato scale factor [0.5, 1.5]
     """
-    num_notes = len(score_note_array) if hasattr(score_note_array, '__len__') else 256
-    
-    if performance_note_array is not None:
-        # Extract ground truth from actual performance alignment
-        delta_t = torch.tensor(performance_note_array.get('onset_sec', np.zeros(num_notes)) - score_note_array.get('onset_sec', np.zeros(num_notes)), dtype=torch.float32)
+    score_notes = None
+    perf_notes = None
+
+    try:
+        import partitura as pt
+
+        # Load score note array
+        if isinstance(score_path_or_array, str) and os.path.exists(score_path_or_array):
+            score_obj = pt.load_score(score_path_or_array)
+            score_notes = score_obj.note_array()
+        elif hasattr(score_path_or_array, 'dtype'):
+            score_notes = score_path_or_array
+
+        # Load performance note array
+        if isinstance(perf_path_or_array, str) and os.path.exists(perf_path_or_array):
+            perf_obj = pt.load_performance(perf_path_or_array)
+            perf_notes = perf_obj.note_array()
+        elif hasattr(perf_path_or_array, 'dtype'):
+            perf_notes = perf_path_or_array
+
+    except Exception:
+        pass
+
+    num_notes = len(score_notes) if (score_notes is not None and len(score_notes) > 0) else 256
+
+    if score_notes is not None and perf_notes is not None and len(score_notes) > 0 and len(perf_notes) > 0:
+        n = min(len(score_notes), len(perf_notes))
+        
+        # 1. Extract Micro-Timing Shift
+        score_onsets = score_notes['onset_sec'][:n] if 'onset_sec' in score_notes.dtype.names else np.zeros(n)
+        perf_onsets = perf_notes['onset_sec'][:n] if 'onset_sec' in perf_notes.dtype.names else np.zeros(n)
+        delta_t = torch.tensor(perf_onsets - score_onsets, dtype=torch.float32)
         delta_t = torch.clamp(delta_t, min=-0.025, max=0.025)
-        
-        velocity = torch.tensor(performance_note_array.get('velocity', np.full(num_notes, 64)), dtype=torch.float32)
-        
-        score_dur = score_note_array.get('duration_sec', np.ones(num_notes))
-        perf_dur = performance_note_array.get('duration_sec', np.ones(num_notes))
-        articulation = torch.tensor(perf_dur / np.maximum(score_dur, 1e-4), dtype=torch.float32)
+
+        # 2. Extract MIDI Velocity
+        velocities = perf_notes['velocity'][:n] if 'velocity' in perf_notes.dtype.names else np.full(n, 64)
+        velocity = torch.tensor(velocities, dtype=torch.float32)
+
+        # 3. Extract Articulation Scale
+        score_durs = score_notes['duration_sec'][:n] if 'duration_sec' in score_notes.dtype.names else np.ones(n)
+        perf_durs = perf_notes['duration_sec'][:n] if 'duration_sec' in perf_notes.dtype.names else np.ones(n)
+        articulation = torch.tensor(perf_durs / np.maximum(score_durs, 1e-4), dtype=torch.float32)
         articulation = torch.clamp(articulation, min=0.1, max=3.0)
-        
-        pedal = torch.tensor(performance_note_array.get('pedal', np.zeros(num_notes)), dtype=torch.float32)
-        tempo_scale = torch.tensor(performance_note_array.get('tempo_scale', np.ones(num_notes)), dtype=torch.float32)
+
+        # 4. Extract Sustain Pedal & Tempo Scale
+        pedal = torch.zeros(n, dtype=torch.float32)
+        tempo_scale = torch.ones(n, dtype=torch.float32)
 
     else:
         # Fallback target generation for synthetic testing

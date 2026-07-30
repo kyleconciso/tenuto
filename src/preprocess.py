@@ -92,7 +92,7 @@ def preprocess_combined_dataset(data_dir: str = "./data", processed_dir: str = "
             continue
 
         x = extract_40d_features_from_score(score_path)
-        targets = compute_alignment_targets(None, None)
+        targets = compute_alignment_targets(score_path, perf_path)
 
         if x is not None and len(x) > 0:
             torch.save({
