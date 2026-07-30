@@ -15,18 +15,39 @@ class TenutoScoreDataset(Dataset):
         self.samples = []
 
         # Auto-detect preprocessed .pt files in data_dir
+        raw_files = []
         if os.path.exists(data_dir):
             for root, _, files in os.walk(data_dir):
                 for f in files:
                     if f.endswith('.pt') or f.endswith('.npz'):
-                        self.samples.append(os.path.join(root, f))
+                        raw_files.append(os.path.join(root, f))
         
         # If no .pt files found, fallback to synthetic dataset for pipeline verification
-        if len(self.samples) == 0:
+        if len(raw_files) == 0:
             print(f"[TenutoDataset] No pre-processed datasets found in '{data_dir}'. Generating synthetic note sequences for pipeline verification...")
             self.synthetic_num_samples = 100
         else:
-            print(f"[TenutoDataset] Successfully loaded {len(self.samples)} pre-processed tensors from '{data_dir}'.")
+            # Chunk the raw files into seq_len-note sequences with 50% overlap (hop = seq_len // 2)
+            hop_size = seq_len // 2
+            for filepath in raw_files:
+                try:
+                    data = torch.load(filepath, map_location="cpu")
+                    x = data.get("x")
+                    if x is None:
+                        continue
+                    if x.ndim == 1:
+                        x = x.unsqueeze(0)
+                    num_notes = x.size(0)
+                    if num_notes == 0:
+                        continue
+                    if num_notes <= seq_len:
+                        self.samples.append({"path": filepath, "start_idx": 0})
+                    else:
+                        for start_idx in range(0, num_notes - hop_size, hop_size):
+                            self.samples.append({"path": filepath, "start_idx": start_idx})
+                except Exception as e:
+                    print(f"Failed to load {filepath}: {e}")
+            print(f"[TenutoDataset] Successfully loaded {len(raw_files)} files into {len(self.samples)} chunks from '{data_dir}'.")
 
     def __len__(self):
         if hasattr(self, 'synthetic_num_samples'):
@@ -53,7 +74,10 @@ class TenutoScoreDataset(Dataset):
             }
             return x, targets
         else:
-            filepath = self.samples[idx]
+            sample_info = self.samples[idx]
+            filepath = sample_info["path"]
+            start_idx = sample_info["start_idx"]
+            
             data = torch.load(filepath, map_location="cpu")
             x = data["x"]
             
@@ -61,30 +85,33 @@ class TenutoScoreDataset(Dataset):
             if x.ndim == 1:
                 x = x.unsqueeze(0)
 
+            # Extract the chunk
+            end_idx = min(start_idx + self.seq_len, x.size(0))
+            x_chunk = x[start_idx:end_idx]
+
             # Pad or truncate x to fixed seq_len if needed
-            if x.size(0) < self.seq_len:
-                pad_size = self.seq_len - x.size(0)
-                pad = torch.zeros(pad_size, x.size(1))
-                x = torch.cat([x, pad], dim=0)
-            elif x.size(0) > self.seq_len:
-                x = x[:self.seq_len]
+            if x_chunk.size(0) < self.seq_len:
+                pad_size = self.seq_len - x_chunk.size(0)
+                pad = torch.zeros(pad_size, x_chunk.size(1))
+                x_chunk = torch.cat([x_chunk, pad], dim=0)
 
             targets = data.get("targets", {})
             if not targets:
                 from src.alignment import compute_alignment_targets
                 targets = compute_alignment_targets(None, None)
             
-            # Ensure target tensors match seq_len
+            targets_chunk = {}
             for k in ["delta_t", "velocity", "articulation", "pedal", "tempo_scale"]:
                 if k in targets:
                     v = targets[k]
-                    if v.size(0) < self.seq_len:
-                        pad_v = torch.zeros(self.seq_len - v.size(0))
-                        targets[k] = torch.cat([v, pad_v], dim=0)
-                    elif v.size(0) > self.seq_len:
-                        targets[k] = v[:self.seq_len]
+                    v_chunk = v[start_idx:end_idx] if start_idx < v.size(0) else torch.zeros(0)
+                    if v_chunk.size(0) < self.seq_len:
+                        pad_v = torch.zeros(self.seq_len - v_chunk.size(0))
+                        targets_chunk[k] = torch.cat([v_chunk, pad_v], dim=0)
+                    else:
+                        targets_chunk[k] = v_chunk[:self.seq_len]
 
-            return x, targets
+            return x_chunk, targets_chunk
 
 def create_dataloaders(data_dir: str, batch_size: int = 16, seq_len: int = 256, in_features: int = 40, num_workers: int = 0):
     """Creates train and validation PyTorch DataLoaders for score sequences."""

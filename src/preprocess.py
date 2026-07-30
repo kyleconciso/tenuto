@@ -42,24 +42,35 @@ def preprocess_combined_dataset(data_dir: str = "./data", processed_dir: str = "
                 else:
                     aligned_pairs.append((score_file, None, "asap"))
 
-    # 2. Scan PianoCoRe dataset for aligned score-performance pairs
+    # 2. Scan PianoCoRe dataset for parquet files
     pianocore_dir = os.path.join(data_dir, "pianocore")
     if os.path.exists(pianocore_dir):
+        import tempfile
+        try:
+            import pandas as pd
+        except ImportError:
+            pd = None
+            print("[TenutoPreprocess] pandas not installed. Cannot parse PianoCoRe parquets.")
+            
         for root, _, files in os.walk(pianocore_dir):
-            score_file = None
-            perf_files = []
             for f in files:
-                f_lower = f.lower()
-                if 'score' in f_lower and f_lower.endswith(('.mid', '.midi', '.xml')):
-                    score_file = os.path.join(root, f)
-                elif f_lower.endswith(('.mid', '.midi')) and not 'score' in f_lower:
-                    perf_files.append(os.path.join(root, f))
-
-            if score_file and perf_files:
-                for pf in perf_files:
-                    aligned_pairs.append((score_file, pf, "pianocore"))
-            elif score_file:
-                aligned_pairs.append((score_file, None, "pianocore"))
+                if f.endswith('.parquet') and pd is not None:
+                    pq_file = os.path.join(root, f)
+                    try:
+                        df = pd.read_parquet(pq_file)
+                        for idx, row in df.iterrows():
+                            xml_bytes = row.get('score_xml_bytes')
+                            midi_bytes = row.get('performance_midi_bytes')
+                            if xml_bytes is not None and midi_bytes is not None:
+                                with tempfile.NamedTemporaryFile(delete=False, suffix=".xml") as xml_file:
+                                    xml_file.write(xml_bytes)
+                                    xml_path = xml_file.name
+                                with tempfile.NamedTemporaryFile(delete=False, suffix=".mid") as mid_file:
+                                    mid_file.write(midi_bytes)
+                                    mid_path = mid_file.name
+                                aligned_pairs.append((xml_path, mid_path, f"pianocore_{row.get('id', idx)}"))
+                    except Exception as e:
+                        print(f"[TenutoPreprocess] Failed to read {pq_file}: {e}")
 
     if not aligned_pairs:
         print(f"[TenutoPreprocess] No score-performance pairs found in '{data_dir}'.")
@@ -94,7 +105,7 @@ def preprocess_combined_dataset(data_dir: str = "./data", processed_dir: str = "
         x = extract_40d_features_from_score(score_path)
         targets = compute_alignment_targets(score_path, perf_path)
 
-        if x is not None and len(x) > 0:
+        if x is not None and len(x) > 0 and targets is not None:
             torch.save({
                 "x": x,
                 "targets": targets,
@@ -103,6 +114,14 @@ def preprocess_combined_dataset(data_dir: str = "./data", processed_dir: str = "
                 "source": source_tag
             }, dest_path)
             processed_count += 1
+            
+        # Clean up temp files if from pianocore
+        if source_tag.startswith("pianocore_"):
+            try:
+                if os.path.exists(score_path): os.remove(score_path)
+                if os.path.exists(perf_path): os.remove(perf_path)
+            except:
+                pass
 
     print(f"[TenutoPreprocess] Preprocessing Complete! Unified dataset saved to '{processed_dir}' ({processed_count} processed, {skipped_count} skipped).")
 

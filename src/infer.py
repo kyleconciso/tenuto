@@ -52,8 +52,43 @@ def infer_performance(score_path: str, checkpoint_path: str, model_type: str = "
         print(f"  - Tempo Scale range: [{predictions['tempo_scale'].min().item():.2f}x, {predictions['tempo_scale'].max().item():.2f}x]")
 
     # 3. Render Expressive MIDI File
-    score_notes_placeholder = [{"pitch": 60 + (i % 24), "onset_sec": i * 0.25, "duration_sec": 0.25} for i in range(x.size(1))]
-    render_expressive_midi(score_notes_placeholder, predictions, output_midi_path=output_midi)
+    try:
+        import partitura as pt
+        score = pt.load_score(target_score)
+        
+        # Handle partitura's note array extraction
+        try:
+            score_notes_raw = score.note_array()
+        except Exception:
+            note_arrays = []
+            for part in score.parts:
+                try:
+                    na = part.note_array()
+                    if na is not None and len(na) > 0:
+                        note_arrays.append(na)
+                except Exception:
+                    pass
+            if note_arrays:
+                score_notes_raw = np.concatenate(note_arrays)
+            else:
+                score_notes_raw = np.array([])
+        
+        score_notes = []
+        for i in range(len(score_notes_raw)):
+            note = score_notes_raw[i]
+            onset = note['onset_sec'] if 'onset_sec' in score_notes_raw.dtype.names else (note['onset_beat'] * 0.5 if 'onset_beat' in score_notes_raw.dtype.names else i * 0.25)
+            dur = note['duration_sec'] if 'duration_sec' in score_notes_raw.dtype.names else (note['duration_beat'] * 0.5 if 'duration_beat' in score_notes_raw.dtype.names else 0.25)
+            pitch = note['pitch'] if 'pitch' in score_notes_raw.dtype.names else 60
+            score_notes.append({
+                "pitch": pitch,
+                "onset_sec": onset,
+                "duration_sec": dur
+            })
+    except Exception as e:
+        print(f"[Tenuto Inference] Failed to load score notes: {e}. Falling back to arpeggio.")
+        score_notes = [{"pitch": 60 + (i % 24), "onset_sec": i * 0.25, "duration_sec": 0.25} for i in range(x.size(1))]
+
+    render_expressive_midi(score_notes, predictions, output_midi_path=output_midi)
 
     return predictions
 

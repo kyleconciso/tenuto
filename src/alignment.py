@@ -1,5 +1,6 @@
 import numpy as np
 import torch
+import os
 
 def compute_alignment_targets(score_path_or_array=None, perf_path_or_array=None):
     r"""
@@ -34,7 +35,8 @@ def compute_alignment_targets(score_path_or_array=None, perf_path_or_array=None)
         elif hasattr(perf_path_or_array, 'dtype'):
             perf_notes = perf_path_or_array
 
-    except Exception:
+    except Exception as e:
+        print(f"[Alignment] Exception during loading: {e}")
         pass
 
     num_notes = len(score_notes) if (score_notes is not None and len(score_notes) > 0) else 256
@@ -63,12 +65,8 @@ def compute_alignment_targets(score_path_or_array=None, perf_path_or_array=None)
         tempo_scale = torch.ones(n, dtype=torch.float32)
 
     else:
-        # Fallback target generation for synthetic testing
-        delta_t = torch.clamp(0.01 * torch.randn(num_notes), min=-0.025, max=0.025)
-        velocity = torch.clamp(64.0 + 15.0 * torch.randn(num_notes), min=0.0, max=127.0)
-        articulation = torch.clamp(1.0 + 0.2 * torch.randn(num_notes), min=0.1, max=3.0)
-        pedal = torch.clamp(64.0 + 30.0 * torch.randn(num_notes), min=0.0, max=127.0)
-        tempo_scale = torch.clamp(1.0 + 0.1 * torch.randn(num_notes), min=0.5, max=1.5)
+        print("[Alignment] Failed to compute targets due to missing or invalid notes.")
+        return None
 
     return {
         "delta_t": delta_t,

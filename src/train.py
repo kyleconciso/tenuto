@@ -38,18 +38,22 @@ class TenutoLoss(nn.Module):
     def forward(self, predictions, targets):
         loss_timing = self.huber(predictions["delta_t"], targets["delta_t"])
         loss_velocity = F.mse_loss(predictions["velocity"], targets["velocity"])
+        loss_articulation = F.mse_loss(predictions["articulation"], targets["articulation"]) if "articulation" in targets else torch.tensor(0.0, device=predictions["delta_t"].device)
+        loss_pedal = F.mse_loss(predictions["pedal"], targets["pedal"]) if "pedal" in targets else torch.tensor(0.0, device=predictions["delta_t"].device)
         
         if "tempo_scale" in predictions:
             loss_smooth = self.compute_smoothness_loss(predictions["tempo_scale"])
         else:
             loss_smooth = torch.tensor(0.0, device=predictions["delta_t"].device)
 
-        total_loss = (self.w_timing * loss_timing) + (self.w_velocity * loss_velocity) + (self.w_smooth * loss_smooth)
+        total_loss = (self.w_timing * loss_timing) + (self.w_velocity * loss_velocity) + loss_articulation + loss_pedal + (self.w_smooth * loss_smooth)
         
         return total_loss, {
             "total_loss": total_loss.item(),
             "loss_timing": loss_timing.item(),
             "loss_velocity": loss_velocity.item(),
+            "loss_articulation": loss_articulation.item() if isinstance(loss_articulation, torch.Tensor) else 0.0,
+            "loss_pedal": loss_pedal.item() if isinstance(loss_pedal, torch.Tensor) else 0.0,
             "loss_smooth": loss_smooth.item() if isinstance(loss_smooth, torch.Tensor) else 0.0
         }
 
@@ -83,6 +87,8 @@ def train_epoch(model, dataloader, criterion, optimizer, device):
     total_loss_accum = 0.0
     timing_loss_accum = 0.0
     velocity_loss_accum = 0.0
+    articulation_loss_accum = 0.0
+    pedal_loss_accum = 0.0
     total_samples = 0
 
     for x, targets in tqdm(dataloader, desc="Training", leave=False):
@@ -100,16 +106,20 @@ def train_epoch(model, dataloader, criterion, optimizer, device):
         total_loss_accum += loss_components["total_loss"] * batch_size
         timing_loss_accum += loss_components["loss_timing"] * batch_size
         velocity_loss_accum += loss_components["loss_velocity"] * batch_size
+        articulation_loss_accum += loss_components["loss_articulation"] * batch_size
+        pedal_loss_accum += loss_components["loss_pedal"] * batch_size
         total_samples += batch_size
 
     n = max(total_samples, 1)
-    return total_loss_accum / n, timing_loss_accum / n, velocity_loss_accum / n
+    return total_loss_accum / n, timing_loss_accum / n, velocity_loss_accum / n, articulation_loss_accum / n, pedal_loss_accum / n
 
 def validate(model, dataloader, criterion, device):
     model.eval()
     total_loss_accum = 0.0
     timing_loss_accum = 0.0
     velocity_loss_accum = 0.0
+    articulation_loss_accum = 0.0
+    pedal_loss_accum = 0.0
     total_samples = 0
 
     with torch.no_grad():
@@ -124,10 +134,12 @@ def validate(model, dataloader, criterion, device):
             total_loss_accum += loss_components["total_loss"] * batch_size
             timing_loss_accum += loss_components["loss_timing"] * batch_size
             velocity_loss_accum += loss_components["loss_velocity"] * batch_size
+            articulation_loss_accum += loss_components["loss_articulation"] * batch_size
+            pedal_loss_accum += loss_components["loss_pedal"] * batch_size
             total_samples += batch_size
 
     n = max(total_samples, 1)
-    return total_loss_accum / n, timing_loss_accum / n, velocity_loss_accum / n
+    return total_loss_accum / n, timing_loss_accum / n, velocity_loss_accum / n, articulation_loss_accum / n, pedal_loss_accum / n
 
 def main():
     parser = argparse.ArgumentParser(description="Tenuto Expressive Score-to-Performance AI Training")
@@ -158,12 +170,12 @@ def main():
     best_val_loss = float('inf')
     for epoch in range(1, args.epochs + 1):
         t0 = time.time()
-        train_loss, train_timing, train_vel = train_epoch(model, train_loader, criterion, optimizer, device)
-        val_loss, val_timing, val_vel = validate(model, val_loader, criterion, device)
+        train_loss, train_timing, train_vel, train_art, train_ped = train_epoch(model, train_loader, criterion, optimizer, device)
+        val_loss, val_timing, val_vel, val_art, val_ped = validate(model, val_loader, criterion, device)
         scheduler.step()
         
         elapsed = time.time() - t0
-        print(f"Epoch {epoch:02d}/{args.epochs:02d} | Train Loss: {train_loss:.4f} (Timing: {train_timing:.5f}, Vel: {train_vel:.2f}) | Val Loss: {val_loss:.4f} | Time: {elapsed:.1f}s")
+        print(f"Epoch {epoch:02d}/{args.epochs:02d} | Train Loss: {train_loss:.4f} (Timing: {train_timing:.5f}, Vel: {train_vel:.2f}, Art: {train_art:.2f}, Ped: {train_ped:.2f}) | Val Loss: {val_loss:.4f} | Time: {elapsed:.1f}s")
 
         if val_loss < best_val_loss:
             best_val_loss = val_loss

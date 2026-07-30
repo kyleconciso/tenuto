@@ -90,4 +90,5 @@ def extract_40d_features_from_score(score_or_path):
         return torch.tensor(features, dtype=torch.float32)
 
     except Exception as e:
-        return torch.randn(256, 40)
+        print(f"[Features] Failed to extract features: {e}")
+        return None

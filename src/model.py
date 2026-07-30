@@ -5,7 +5,7 @@ import torch.nn.functional as F
 
 class PositionalEncoding(nn.Module):
     """Sinusoidal Positional Encoding for Sequential Note Tokens."""
-    def __init__(self, d_model: int, max_len: int = 4096):
+    def __init__(self, d_model: int, max_len: int = 15000):
         super(PositionalEncoding, self).__init__()
         pe = torch.zeros(max_len, d_model)
         position = torch.arange(0, max_len, dtype=torch.float).unsqueeze(1)
