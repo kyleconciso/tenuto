@@ -6,7 +6,7 @@ ASAP_REPO_URL = "https://github.com/fosfrancesco/asap-dataset.git"
 PIANOCORE_HF_DATASET = "SyMuPe/PianoCoRe"
 
 def download_asap_dataset(target_dir: str = "./data/asap", force: bool = False):
-    """Downloads ASAP (Aligned Scores and Performances) dataset."""
+    """Downloads ASAP dataset."""
     os.makedirs(os.path.dirname(target_dir), exist_ok=True)
     if os.path.exists(target_dir) and not force:
         print(f"[TenutoData] ASAP dataset already exists at '{target_dir}'. Skipping.")
@@ -20,30 +20,39 @@ def download_asap_dataset(target_dir: str = "./data/asap", force: bool = False):
         print(f"[TenutoData] Git clone failed: {e}.")
     return target_dir
 
-def download_pianocore_dataset(target_dir: str = "./data/pianocore", subset: str = "PianoCoRe-A"):
-    """Downloads PianoCoRe dataset (SyMuPe/PianoCoRe) from Hugging Face."""
+def download_pianocore_dataset(target_dir: str = "./data/pianocore", subset: str = "PianoCoRe-A*"):
+    """
+    Downloads specific subset of PianoCoRe (default: 'PianoCoRe-A*' for high-precision alignments).
+    """
     os.makedirs(target_dir, exist_ok=True)
-    print(f"[TenutoData] Fetching PianoCoRe ({subset}) from Hugging Face '{PIANOCORE_HF_DATASET}'...")
+    print(f"[TenutoData] Fetching PianoCoRe subset '{subset}' from Hugging Face '{PIANOCORE_HF_DATASET}'...")
     try:
         from huggingface_hub import snapshot_download
-        snapshot_download(repo_id=PIANOCORE_HF_DATASET, repo_type="dataset", local_dir=target_dir)
-        print(f"[TenutoData] Downloaded PianoCoRe dataset to '{target_dir}'.")
+        # Download files matching subset pattern
+        snapshot_download(
+            repo_id=PIANOCORE_HF_DATASET,
+            repo_type="dataset",
+            allow_patterns=[f"{subset}/*", "*.json", "*.csv", "*.md"],
+            local_dir=target_dir
+        )
+        print(f"[TenutoData] Successfully downloaded PianoCoRe subset '{subset}' to '{target_dir}'.")
     except ImportError:
-        print("[TenutoData] `huggingface_hub` not installed. Install with `pip install huggingface_hub`.")
+        print("[TenutoData] `huggingface_hub` not installed. Run `pip install huggingface_hub`.")
     except Exception as e:
         print(f"[TenutoData] PianoCoRe download notice: {e}")
     return target_dir
 
 def main():
     parser = argparse.ArgumentParser(description="Download Datasets for Tenuto")
-    parser.add_argument("--dataset", type=str, default="asap", choices=["asap", "pianocore", "all"])
+    parser.add_argument("--dataset", type=str, default="combined", choices=["asap", "pianocore", "combined"])
+    parser.add_argument("--pianocore_subset", type=str, default="PianoCoRe-A*", choices=["PianoCoRe-A*", "PianoCoRe-A", "PianoCoRe-B"])
     parser.add_argument("--target_dir", type=str, default="./data", help="Base target directory")
     args = parser.parse_args()
 
-    if args.dataset in ["asap", "all"]:
+    if args.dataset in ["asap", "combined"]:
         download_asap_dataset(os.path.join(args.target_dir, "asap"))
-    if args.dataset in ["pianocore", "all"]:
-        download_pianocore_dataset(os.path.join(args.target_dir, "pianocore"))
+    if args.dataset in ["pianocore", "combined"]:
+        download_pianocore_dataset(os.path.join(args.target_dir, "pianocore"), subset=args.pianocore_subset)
 
 if __name__ == "__main__":
     main()
