@@ -58,6 +58,8 @@ def preprocess_combined_dataset(data_dir: str = "./data", processed_dir: str = "
                     pq_file = os.path.join(root, f)
                     try:
                         df = pd.read_parquet(pq_file)
+                        if 'tier_a_star' in df.columns:
+                            df = df[df['tier_a_star'] == True]
                         for idx, row in df.iterrows():
                             xml_bytes = row.get('score_xml_bytes')
                             midi_bytes = row.get('performance_midi_bytes')

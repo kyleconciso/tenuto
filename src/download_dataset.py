@@ -32,7 +32,7 @@ def download_pianocore_dataset(target_dir: str = "./data/pianocore", subset: str
         snapshot_download(
             repo_id=PIANOCORE_HF_DATASET,
             repo_type="dataset",
-            allow_patterns=[f"{subset}/*", "*.json", "*.csv", "*.md"],
+            allow_patterns=["data/*.parquet", "*.json", "*.csv", "*.md"],
             local_dir=target_dir
         )
         print(f"[TenutoData] Successfully downloaded PianoCoRe subset '{subset}' to '{target_dir}'.")
