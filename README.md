@@ -8,16 +8,11 @@ Instead of predicting events note-by-note, Tenuto runs a single forward pass ove
 
 ---
 
-## 🚀 The Easiest Way to Train: Open in Colab
+## Open in Colab
 
 [![Open In Colab](https://colab.research.google.com/assets/colab-badge.svg)](https://colab.research.google.com/github/kyleconciso/tenuto/blob/main/notebooks/colab_training.ipynb)
 
-We highly recommend using our **Google Colab Notebook**. It is a fully configured, one-click pipeline that will:
-1. Automatically download the **ASAP** and **PianoCoRe** datasets (over 130,000+ score-performance pairs!)
-2. Unpack HuggingFace `.parquet` database files natively.
-3. Preprocess and chunk the data into highly expressive 256-note tensors.
-4. Train the 5-million parameter Transformer model using a T4 GPU.
-5. Generate an A/B audio comparison between a mechanical score, a real human, and the Tenuto AI.
+A complete training and inference pipeline is available in the provided Google Colab Notebook. The notebook handles dataset downloading, preprocessing, training, and audio generation.
 
 ---
 
