@@ -24,15 +24,18 @@ def render_expressive_midi(score_notes, predictions, output_midi_path: str = "ex
     mid.tracks.append(music_track)
     music_track.append(MetaMessage('track_name', name='Tenuto Expressive Performance', time=0))
 
-    # Extract predictions
-    delta_t = predictions['delta_t'].cpu().numpy() if hasattr(predictions['delta_t'], 'cpu') else predictions['delta_t']
-    velocity = predictions['velocity'].cpu().numpy() if hasattr(predictions['velocity'], 'cpu') else predictions['velocity']
-    articulation = predictions['articulation'].cpu().numpy() if hasattr(predictions['articulation'], 'cpu') else predictions['articulation']
-    pedal = predictions['pedal'].cpu().numpy() if hasattr(predictions['pedal'], 'cpu') else predictions['pedal']
-    
-    tempo_scale = predictions.get('tempo_scale', np.ones(len(delta_t)))
-    if hasattr(tempo_scale, 'cpu'):
-        tempo_scale = tempo_scale.cpu().numpy()
+    # Extract & flatten predictions to 1D arrays
+    def to_1d_numpy(val):
+        if hasattr(val, 'cpu'):
+            val = val.cpu().numpy()
+        val = np.asarray(val).reshape(-1)
+        return val
+
+    delta_t = to_1d_numpy(predictions['delta_t'])
+    velocity = to_1d_numpy(predictions['velocity'])
+    articulation = to_1d_numpy(predictions['articulation'])
+    pedal = to_1d_numpy(predictions['pedal'])
+    tempo_scale = to_1d_numpy(predictions.get('tempo_scale', np.ones(len(delta_t))))
 
     # Write initial tempo (microseconds per beat)
     initial_tempo = mido.bpm2tempo(base_bpm)
@@ -43,13 +46,13 @@ def render_expressive_midi(score_notes, predictions, output_midi_path: str = "ex
 
     num_notes = len(delta_t)
     for i in range(num_notes):
-        pitch = int(score_notes[i]['pitch']) if isinstance(score_notes, (list, np.ndarray)) and 'pitch' in score_notes[i] else int(60 + (i % 24))
-        onset_sec = score_notes[i]['onset_sec'] if isinstance(score_notes, (list, np.ndarray)) and 'onset_sec' in score_notes[i] else (i * 0.25)
-        dur_sec = score_notes[i]['duration_sec'] if isinstance(score_notes, (list, np.ndarray)) and 'duration_sec' in score_notes[i] else 0.25
+        pitch = int(score_notes[i]['pitch']) if isinstance(score_notes, (list, np.ndarray)) and i < len(score_notes) and 'pitch' in score_notes[i] else int(60 + (i % 24))
+        onset_sec = float(score_notes[i]['onset_sec']) if isinstance(score_notes, (list, np.ndarray)) and i < len(score_notes) and 'onset_sec' in score_notes[i] else float(i * 0.25)
+        dur_sec = float(score_notes[i]['duration_sec']) if isinstance(score_notes, (list, np.ndarray)) and i < len(score_notes) and 'duration_sec' in score_notes[i] else 0.25
         
         # Apply predicted micro-timing shift and rubato scale
-        scaled_onset_sec = (onset_sec * tempo_scale[i]) + delta_t[i]
-        scaled_dur_sec = dur_sec * articulation[i]
+        scaled_onset_sec = float((onset_sec * tempo_scale[i]) + delta_t[i])
+        scaled_dur_sec = float(dur_sec * articulation[i])
         vel = int(np.clip(velocity[i], 1, 127))
 
         onset_tick = int(np.maximum(0, scaled_onset_sec * ticks_per_sec))

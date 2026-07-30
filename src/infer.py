@@ -14,9 +14,23 @@ def infer_performance(score_path: str, checkpoint_path: str, model_type: str = "
     """
     device = get_device()
     
+    # Check if score_path exists; if not, search for any available score file in data/
+    target_score = score_path
+    if not os.path.exists(target_score):
+        found = False
+        for root, _, files in os.walk("./data"):
+            for f in files:
+                if f.lower().endswith(('.xml', '.mxl', '.musicxml', '.mid', '.midi')):
+                    target_score = os.path.join(root, f)
+                    print(f"[Tenuto Inference] Score '{score_path}' not found. Using dataset score '{target_score}'.")
+                    found = True
+                    break
+            if found:
+                break
+
     # 1. Feature Extraction
-    print(f"[Tenuto Inference] Extracting note features from '{score_path}'...")
-    features = extract_40d_features_from_score(score_path)
+    print(f"[Tenuto Inference] Extracting note features from '{target_score}'...")
+    features = extract_40d_features_from_score(target_score)
     x = features.unsqueeze(0).to(device) # Batch dimension (1, SeqLen, InFeatures)
 
     # 2. Load Model & Weights
@@ -25,7 +39,7 @@ def infer_performance(score_path: str, checkpoint_path: str, model_type: str = "
     if os.path.exists(checkpoint_path):
         load_checkpoint(checkpoint_path, model)
     else:
-        print(f"[Tenuto Inference] Checkpoint '{checkpoint_path}' not found. Using initialized weights for dry-run verification.")
+        print(f"[Tenuto Inference] Checkpoint '{checkpoint_path}' not found. Using initialized weights.")
 
     model.eval()
     with torch.no_grad():

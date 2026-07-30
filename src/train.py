@@ -110,7 +110,7 @@ def validate(model, dataloader, criterion, device):
 
 def main():
     parser = argparse.ArgumentParser(description="Tenuto Expressive Score-to-Performance AI Training")
-    parser.add_argument("--data_dir", type=str, default="./data", help="Path to preprocessed dataset")
+    parser.add_argument("--data_dir", type=str, default="./data/processed", help="Path to preprocessed dataset")
     parser.add_argument("--model_type", type=str, default="transformer", choices=["transformer", "bigru"])
     parser.add_argument("--in_features", type=int, default=40, help="Input note feature vector dimension (10 or 40)")
     parser.add_argument("--epochs", type=int, default=20, help="Number of training epochs")
