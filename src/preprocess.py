@@ -39,8 +39,9 @@ def preprocess_combined_dataset(data_dir: str = "./data", processed_dir: str = "
     skipped_count = 0
     global_idx = 0
     
-    # Simple deterministic random split based on index
     random.seed(42)
+
+    pbar = tqdm(desc="Preprocessing Score-Performance Pairs")
 
     # 1. Process ASAP
     asap_dir = os.path.join(data_dir, "asap")
@@ -64,12 +65,12 @@ def preprocess_combined_dataset(data_dir: str = "./data", processed_dir: str = "
                     dest_dir = train_out if is_train else val_out
                     dest_name = f"asap_pair_{global_idx:06d}.pt"
                     
-                    print(f"[TenutoPreprocess] Processing ASAP {global_idx}...", end="\r")
                     if process_single_pair(score_file, pf, "asap", dest_dir, dest_name, force):
                         processed_count += 1
                     else:
                         skipped_count += 1
                     global_idx += 1
+                    pbar.update(1)
 
     # 2. Process PianoCoRe directly from DataFrames
     pianocore_dir = os.path.join(data_dir, "pianocore")
@@ -87,7 +88,7 @@ def preprocess_combined_dataset(data_dir: str = "./data", processed_dir: str = "
                 if f.endswith('.parquet') and pd is not None:
                     pq_file = os.path.join(root, f)
                     try:
-                        print(f"\n[TenutoPreprocess] Loading {pq_file}...")
+                        pbar.set_postfix_str(f"Loading {os.path.basename(pq_file)}")
                         df = pd.read_parquet(pq_file)
                         if 'tier_a_star' in df.columns:
                             df = df[df['tier_a_star'] == True]
@@ -105,7 +106,6 @@ def preprocess_combined_dataset(data_dir: str = "./data", processed_dir: str = "
                                 source_tag = f"pianocore_{row.get('id', idx)}"
                                 dest_name = f"pianocore_pair_{global_idx:06d}.pt"
                                 
-                                # Write to temp files immediately and process
                                 with tempfile.NamedTemporaryFile(delete=False, suffix=".xml") as xml_file:
                                     xml_file.write(xml_bytes)
                                     xml_path = xml_file.name
@@ -113,15 +113,12 @@ def preprocess_combined_dataset(data_dir: str = "./data", processed_dir: str = "
                                     mid_file.write(midi_bytes)
                                     mid_path = mid_file.name
                                 
-                                if (global_idx % 50 == 0):
-                                    print(f"  Processed {global_idx} pairs...", end="\r")
-                                
+                                pbar.set_postfix_str(f"Processing chunk pair...")
                                 if process_single_pair(xml_path, mid_path, source_tag, dest_dir, dest_name, force):
                                     processed_count += 1
                                 else:
                                     skipped_count += 1
                                     
-                                # Delete immediately!
                                 try:
                                     os.remove(xml_path)
                                     os.remove(mid_path)
@@ -129,13 +126,14 @@ def preprocess_combined_dataset(data_dir: str = "./data", processed_dir: str = "
                                     pass
                                 
                                 global_idx += 1
+                                pbar.update(1)
                                 
                     except Exception as e:
                         print(f"\n[TenutoPreprocess] Failed to process {pq_file}: {e}")
                     
-                    # Delete the DataFrame to save memory
                     del df
 
+    pbar.close()
     print(f"\n[TenutoPreprocess] Preprocessing Complete! Unified dataset saved to '{processed_dir}' ({processed_count} processed, {skipped_count} skipped).")
 
 def main():
