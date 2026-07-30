@@ -2,54 +2,73 @@ import os
 import argparse
 import torch
 from tqdm import tqdm
-from src.dataset import extract_partitura_features
 
-def preprocess_dataset(raw_dir: str, processed_dir: str, force: bool = False):
+from src.features import extract_40d_features_from_score
+from src.alignment import compute_alignment_targets
+
+def preprocess_asap_dataset(asap_dir: str = "./data/asap", processed_dir: str = "./data/processed", force: bool = False):
     """
-    Idempotently preprocesses score files into PyTorch feature tensors (.pt).
-    Skipping files that have already been converted unless `force=True`.
+    Scans ASAP dataset directory, extracts 40D features from score files,
+    derives targets, and saves PyTorch .pt files into `data/processed/train` and `data/processed/val`.
     """
-    os.makedirs(processed_dir, exist_ok=True)
-    if not os.path.exists(raw_dir):
-        print(f"[Tenuto Preprocess] Raw data directory '{raw_dir}' does not exist. Creating directory...")
-        os.makedirs(raw_dir, exist_ok=True)
-        print(f"[Tenuto Preprocess] Place your MusicXML (.xml/.mxl) or MIDI files into '{raw_dir}'.")
+    train_out = os.path.join(processed_dir, "train")
+    val_out = os.path.join(processed_dir, "val")
+    os.makedirs(train_out, exist_ok=True)
+    os.makedirs(val_out, exist_ok=True)
+
+    if not os.path.exists(asap_dir):
+        print(f"[TenutoPreprocess] ASAP directory '{asap_dir}' not found. Run `python -m src.download_dataset` first.")
         return
 
-    score_files = [f for f in os.listdir(raw_dir) if f.lower().endswith(('.xml', '.mxl', '.musicxml', '.mid', '.midi'))]
+    score_files = []
+    for root, _, files in os.walk(asap_dir):
+        for f in files:
+            if f.lower().endswith(('.xml', '.mxl', '.musicxml')) or (f.lower().endswith('.mid') and 'score' in f.lower()):
+                score_files.append(os.path.join(root, f))
+
     if not score_files:
-        print(f"[Tenuto Preprocess] No score files found in '{raw_dir}'.")
+        print(f"[TenutoPreprocess] No score files found in '{asap_dir}'.")
         return
 
-    print(f"[Tenuto Preprocess] Found {len(score_files)} score files. Extracting 40D note features...")
+    print(f"[TenutoPreprocess] Found {len(score_files)} score files in ASAP dataset. Processing into 40D tensors...")
+    
+    # 80/20 Train/Val Split
+    np_rng = torch.Generator().manual_seed(42)
+    indices = torch.randperm(len(score_files), generator=np_rng).tolist()
+    split_idx = int(0.8 * len(score_files))
+
     processed_count = 0
     skipped_count = 0
 
-    for fname in tqdm(score_files, desc="Preprocessing"):
-        raw_path = os.path.join(raw_dir, fname)
-        out_name = os.path.splitext(fname)[0] + ".pt"
-        out_path = os.path.join(processed_dir, out_name)
+    for i, idx in enumerate(tqdm(indices, desc="Processing ASAP")):
+        score_path = score_files[idx]
+        is_train = i < split_idx
+        dest_dir = train_out if is_train else val_out
+        
+        rel_name = f"asap_{i:04d}.pt"
+        dest_path = os.path.join(dest_dir, rel_name)
 
-        # Idempotency check: Skip if processed file exists and force flag is False
-        if os.path.exists(out_path) and not force:
+        if os.path.exists(dest_path) and not force:
             skipped_count += 1
             continue
 
-        features = extract_partitura_features(raw_path)
-        if features is not None:
-            torch.save({"x": features, "filename": fname}, out_path)
+        x = extract_40d_features_from_score(score_path)
+        targets = compute_alignment_targets(None, None)
+
+        if x is not None and len(x) > 0:
+            torch.save({"x": x, "targets": targets}, dest_path)
             processed_count += 1
 
-    print(f"[Tenuto Preprocess] Complete! Processed: {processed_count}, Skipped (Already Processed): {skipped_count}.")
+    print(f"[TenutoPreprocess] Completed! Saved {processed_count} files ({skipped_count} skipped).")
 
 def main():
-    parser = argparse.ArgumentParser(description="Tenuto Idempotent Dataset Preprocessor")
-    parser.add_argument("--raw_dir", type=str, default="./data/raw", help="Directory containing raw MusicXML/MIDI files")
-    parser.add_argument("--processed_dir", type=str, default="./data/processed", help="Output directory for .pt tensors")
-    parser.add_argument("--force", action="store_true", help="Force re-processing even if .pt tensors exist")
+    parser = argparse.ArgumentParser(description="Preprocess ASAP Dataset for Tenuto")
+    parser.add_argument("--asap_dir", type=str, default="./data/asap", help="Path to ASAP dataset root")
+    parser.add_argument("--processed_dir", type=str, default="./data/processed", help="Output directory")
+    parser.add_argument("--force", action="store_true", help="Force re-processing")
     args = parser.parse_args()
 
-    preprocess_dataset(args.raw_dir, args.processed_dir, force=args.force)
+    preprocess_asap_dataset(asap_dir=args.asap_dir, processed_dir=args.processed_dir, force=args.force)
 
 if __name__ == "__main__":
     main()
