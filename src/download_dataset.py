@@ -2,7 +2,7 @@ import os
 import subprocess
 import argparse
 
-ASAP_REPO_URL = "https://github.com/vocaloid-team/asap-dataset.git"
+ASAP_REPO_URL = "https://github.com/fosfrancesco/asap-dataset.git"
 
 def download_asap_dataset(target_dir: str = "./data/asap", force: bool = False):
     """
