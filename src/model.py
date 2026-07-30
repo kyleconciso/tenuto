@@ -45,56 +45,28 @@ class TenutoTransformer(nn.Module):
         self.transformer_encoder = nn.TransformerEncoder(encoder_layer, num_layers=num_layers)
         
         # Parallel Output Heads
-        self.head_tempo = nn.Sequential(
-            nn.Linear(d_model, 128),
-            nn.ReLU(),
-            nn.Linear(128, 1),
-            nn.Sigmoid() # Mapped to [0.5, 1.5] in post-forward
-        )
-        
-        self.head_dynamics = nn.Sequential(
-            nn.Linear(d_model, 128),
-            nn.ReLU(),
-            nn.Linear(128, 1),
-            nn.Sigmoid() # Mapped to [0, 127]
-        )
-        
-        self.head_timing = nn.Sequential(
-            nn.Linear(d_model, 128),
-            nn.ReLU(),
-            nn.Linear(128, 1),
-            nn.Tanh() # Bounded micro-timing shift [-25ms, +25ms]
-        )
-        
-        self.head_velocity = nn.Sequential(
-            nn.Linear(d_model, 128),
-            nn.ReLU(),
-            nn.Linear(128, 1),
-            nn.Sigmoid() # Mapped to [0, 127]
-        )
-        
-        self.head_articulation = nn.Sequential(
-            nn.Linear(d_model, 128),
-            nn.ReLU(),
-            nn.Linear(128, 1),
-            nn.Softplus() # Key release duration scale > 0
-        )
-        
-        self.head_pedal = nn.Sequential(
-            nn.Linear(d_model, 128),
-            nn.ReLU(),
-            nn.Linear(128, 1),
-            nn.Sigmoid() # Continuous Sustain Pedal CC64 [0, 127]
-        )
+        self.head_tempo = nn.Sequential(nn.Linear(d_model, 128), nn.ReLU(), nn.Linear(128, 1), nn.Sigmoid())
+        self.head_dynamics = nn.Sequential(nn.Linear(d_model, 128), nn.ReLU(), nn.Linear(128, 1), nn.Sigmoid())
+        self.head_timing = nn.Sequential(nn.Linear(d_model, 128), nn.ReLU(), nn.Linear(128, 1), nn.Tanh())
+        self.head_velocity = nn.Sequential(nn.Linear(d_model, 128), nn.ReLU(), nn.Linear(128, 1), nn.Sigmoid())
+        self.head_articulation = nn.Sequential(nn.Linear(d_model, 128), nn.ReLU(), nn.Linear(128, 1), nn.Softplus())
+        self.head_pedal = nn.Sequential(nn.Linear(d_model, 128), nn.ReLU(), nn.Linear(128, 1), nn.Sigmoid())
+
+    def print_architecture_summary(self):
+        total_params = sum(p.numel() for p in self.parameters() if p.requires_grad)
+        print("=================================================================")
+        print("                TENUTO TRANSFORMER ARCHITECTURE                  ")
+        print("=================================================================")
+        print(f"  • Input Note Feature Dim:  {self.in_proj.in_features}D")
+        print(f"  • Model Hidden Dim (d):    {self.in_proj.out_features}")
+        print(f"  • Encoder Layers:          6 Layers (Multi-Head Self-Attention)")
+        print(f"  • Attention Heads:         8 Heads")
+        print(f"  • FFN Feedforward Dim:     1024")
+        print(f"  • Output Parallel Heads:   6 Heads (Rubato, Dynamics, Timing, Velocity, Articulation, Pedal)")
+        print(f"  • Total Trainable Params:  {total_params:,} (~{total_params/1e6:.2f} Million)")
+        print("=================================================================\n")
 
     def forward(self, x, src_key_padding_mask=None):
-        """
-        Args:
-            x: Tensor of shape (Batch, SeqLen, InFeatures)
-            src_key_padding_mask: Optional mask for padded note sequences
-        Returns:
-            dict containing all predicted expressive performance parameters
-        """
         h = self.in_proj(x)
         h = self.pos_encoder(h)
         feat = self.transformer_encoder(h, src_key_padding_mask=src_key_padding_mask)
@@ -116,16 +88,21 @@ class TenutoTransformer(nn.Module):
         }
 
 class TenutoBiGRU(nn.Module):
-    """
-    Lightweight 2-Layer Bidirectional GRU Prototype (~1M params) for rapid testing.
-    """
+    """Lightweight 2-Layer Bidirectional GRU Prototype."""
     def __init__(self, in_features: int = 10, hidden_dim: int = 128, num_layers: int = 2):
         super(TenutoBiGRU, self).__init__()
         self.gru = nn.GRU(in_features, hidden_dim, num_layers=num_layers, batch_first=True, bidirectional=True)
         d_out = hidden_dim * 2
-        
         self.head_timing = nn.Sequential(nn.Linear(d_out, 64), nn.ReLU(), nn.Linear(64, 1), nn.Tanh())
         self.head_velocity = nn.Sequential(nn.Linear(d_out, 64), nn.ReLU(), nn.Linear(64, 1), nn.Sigmoid())
+
+    def print_architecture_summary(self):
+        total_params = sum(p.numel() for p in self.parameters() if p.requires_grad)
+        print("=================================================================")
+        print("                 TENUTO BiGRU ARCHITECTURE                       ")
+        print("=================================================================")
+        print(f"  • Total Trainable Params:  {total_params:,} (~{total_params/1e6:.2f} Million)")
+        print("=================================================================\n")
 
     def forward(self, x):
         feat, _ = self.gru(x)

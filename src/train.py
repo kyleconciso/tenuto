@@ -21,7 +21,7 @@ class TenutoLoss(nn.Module):
         self.w_timing = w_timing
         self.w_velocity = w_velocity
         self.w_smooth = w_smooth
-        self.huber = nn.HuberLoss(delta=0.005) # 5ms delta threshold for robust micro-timing loss
+        self.huber = nn.HuberLoss(delta=0.005)
 
     def compute_smoothness_loss(self, tempo_scale):
         r"""
@@ -36,10 +36,6 @@ class TenutoLoss(nn.Module):
         return torch.mean(diff2 ** 2)
 
     def forward(self, predictions, targets):
-        """
-        predictions: dict of model outputs
-        targets: dict of ground-truth expressive features
-        """
         loss_timing = self.huber(predictions["delta_t"], targets["delta_t"])
         loss_velocity = F.mse_loss(predictions["velocity"], targets["velocity"])
         
@@ -56,6 +52,31 @@ class TenutoLoss(nn.Module):
             "loss_velocity": loss_velocity.item(),
             "loss_smooth": loss_smooth.item() if isinstance(loss_smooth, torch.Tensor) else 0.0
         }
+
+def inspect_first_dataset_sample(dataloader):
+    """Prints out a diagnostic summary of the first sample in the dataset."""
+    for x_batch, targets_batch in dataloader:
+        x_sample = x_batch[0]
+        print("=================================================================")
+        print("              DIAGNOSTIC INSPECTION: FIRST DATASET SAMPLE        ")
+        print("=================================================================")
+        print(f"  • Feature Tensor Shape X: {x_sample.shape} (SeqLen={x_sample.size(0)}, Features={x_sample.size(1)})")
+        print(f"  • Sample Note 0 Features (First 10 Dims):")
+        print(f"      - Normalized Pitch:   {x_sample[0, 0].item():.4f}")
+        print(f"      - Pitch Class OneHot: {x_sample[0, 1:13].tolist()}")
+        print(f"      - Nominal Duration:   {x_sample[0, 15].item():.4f}")
+        print(f"      - Beat Position:      {x_sample[0, 16].item():.4f}")
+        print(f"      - Metric Weight:      {x_sample[0, 17:21].tolist()}")
+        
+        print(f"\n  • Sample Ground Truth Targets Y:")
+        print(f"      - Micro Timing Shift (\\Delta t): [{targets_batch['delta_t'][0].min().item():.4f}s, {targets_batch['delta_t'][0].max().item():.4f}s]")
+        print(f"      - MIDI Velocity (v):         [{targets_batch['velocity'][0].min().item():.1f}, {targets_batch['velocity'][0].max().item():.1f}]")
+        print(f"      - Articulation Multiplier:   [{targets_batch['articulation'][0].min().item():.2f}, {targets_batch['articulation'][0].max().item():.2f}]")
+        print(f"      - Sustain Pedal CC64:        [{targets_batch['pedal'][0].min().item():.1f}, {targets_batch['pedal'][0].max().item():.1f}]")
+        if "tempo_scale" in targets_batch:
+            print(f"      - Beat Tempo Scale S(b):     [{targets_batch['tempo_scale'][0].min().item():.2f}x, {targets_batch['tempo_scale'][0].max().item():.2f}x]")
+        print("=================================================================\n")
+        break
 
 def train_epoch(model, dataloader, criterion, optimizer, device):
     model.train()
@@ -122,13 +143,17 @@ def main():
     set_seed(args.seed)
     device = get_device()
 
-    print(f"[Tenuto] Initializing Model architecture: {args.model_type.upper()} ({args.in_features}D Features)...")
+    print(f"[Tenuto] Building Model architecture: {args.model_type.upper()} ({args.in_features}D Features)...")
     model = build_model(model_name=args.model_type, in_features=args.in_features).to(device)
+    if hasattr(model, 'print_architecture_summary'):
+        model.print_architecture_summary()
+
     criterion = TenutoLoss()
     optimizer = optim.AdamW(model.parameters(), lr=args.lr, weight_decay=1e-4)
     scheduler = optim.lr_scheduler.CosineAnnealingLR(optimizer, T_max=args.epochs)
 
     train_loader, val_loader = create_dataloaders(args.data_dir, batch_size=args.batch_size)
+    inspect_first_dataset_sample(train_loader)
 
     best_val_loss = float('inf')
     for epoch in range(1, args.epochs + 1):
