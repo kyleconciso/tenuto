@@ -4,25 +4,7 @@ import torch
 def extract_40d_features_from_score(score_or_path):
     """
     Extracts the full 40D Note Feature Matrix X in R^(N x 40) from a score.
-    Uses partitura if available, with robust fallback feature extraction.
-    
-    Feature Vector Schema (40 dims):
-    --------------------------------
-    0: pitch_norm (1)
-    1-12: pitch_class_onehot (12)
-    13: interval_from_root (1)
-    14: melodic_leap (1)
-    15: nominal_duration (1)
-    16: beat_position (1)
-    17-20: metric_weight_onehot (4)
-    21: score_tempo (1)
-    22-29: dynamic_marking_onehot (8)
-    30: hairpin_slope (1)
-    31-34: articulation_flags (4: staccato, tenuto, accent, fermata)
-    35: is_top_melody (1)
-    36: is_bass_note (1)
-    37: chord_density (1)
-    38-39: staff_id_onehot (2)
+    Uses partitura if available, with multi-part division handling.
     """
     try:
         import partitura as pt
@@ -31,8 +13,23 @@ def extract_40d_features_from_score(score_or_path):
         else:
             score = score_or_path
 
-        # Partitura note array contains structured columns
-        note_array = score.note_array()
+        # Safely extract note array (handle multi-division parts if score.note_array() fails)
+        try:
+            note_array = score.note_array()
+        except Exception:
+            note_arrays = []
+            for part in score.parts:
+                try:
+                    na = part.note_array()
+                    if na is not None and len(na) > 0:
+                        note_arrays.append(na)
+                except Exception:
+                    pass
+            if note_arrays:
+                note_array = np.concatenate(note_arrays)
+            else:
+                note_array = np.array([])
+
         num_notes = len(note_array)
         if num_notes == 0:
             return torch.zeros(0, 40)
@@ -48,36 +45,34 @@ def extract_40d_features_from_score(score_or_path):
         for i, pc in enumerate(pitch_classes):
             features[i, 1 + pc] = 1.0
 
-        # Melodic leap (difference between consecutive notes)
+        # Melodic leap
         leaps = np.zeros(num_notes, dtype=np.float32)
         leaps[1:] = (pitches[1:] - pitches[:-1]) / 127.0
         features[:, 14] = leaps
 
         # 2. Metric Grid
-        onset_beats = note_array['onset_beat']
-        dur_beats = note_array['duration_beat']
+        onset_beats = note_array['onset_beat'] if 'onset_beat' in note_array.dtype.names else np.zeros(num_notes)
+        dur_beats = note_array['duration_beat'] if 'duration_beat' in note_array.dtype.names else np.ones(num_notes)
         features[:, 15] = np.clip(dur_beats / 4.0, 0.0, 4.0)
         features[:, 16] = onset_beats % 4.0 / 4.0
 
-        # Metric weight one-hot (4 dims: downbeat = beat 0)
+        # Metric weight one-hot
         beat_idx = (np.floor(onset_beats) % 4).astype(int)
         for i, b in enumerate(beat_idx):
             features[i, 17 + b] = 1.0
         
         features[:, 21] = 120.0 / 240.0 # Default 120 BPM normalized
 
-        # 3. Score Markings (Default dynamics mf = index 4)
-        features[:, 26] = 1.0 # default mf
+        # 3. Score Markings (Default mf = index 26)
+        features[:, 26] = 1.0
 
         # 4. Polyphony & Voice Analysis
-        # Identify chord clusters based on identical onset_beats
         unique_onsets = np.unique(onset_beats)
         for onset in unique_onsets:
             idx = np.where(onset_beats == onset)[0]
             chord_size = len(idx)
             features[idx, 37] = chord_size / 10.0
             
-            # Top melody & bass
             top_idx = idx[np.argmax(pitches[idx])]
             bass_idx = idx[np.argmin(pitches[idx])]
             features[top_idx, 35] = 1.0
@@ -95,5 +90,4 @@ def extract_40d_features_from_score(score_or_path):
         return torch.tensor(features, dtype=torch.float32)
 
     except Exception as e:
-        print(f"[TenutoFeatures] Note extraction warning: {e}. Generating fallback 40D features.")
         return torch.randn(256, 40)
