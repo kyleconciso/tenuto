@@ -8,15 +8,22 @@ Instead of predicting events note-by-note, Tenuto runs a single forward pass ove
 
 ---
 
-## Open in Colab
+## 🚀 The Easiest Way to Train: Open in Colab
 
 [![Open In Colab](https://colab.research.google.com/assets/colab-badge.svg)](https://colab.research.google.com/github/kyleconciso/tenuto/blob/main/notebooks/colab_training.ipynb)
 
-If you don't have datasets ready yet, `train.py` runs on synthetic data by default so you can test the code immediately.
+We highly recommend using our **Google Colab Notebook**. It is a fully configured, one-click pipeline that will:
+1. Automatically download the **ASAP** and **PianoCoRe** datasets (over 130,000+ score-performance pairs!)
+2. Unpack HuggingFace `.parquet` database files natively.
+3. Preprocess and chunk the data into highly expressive 256-note tensors.
+4. Train the 5-million parameter Transformer model using a T4 GPU.
+5. Generate an A/B audio comparison between a mechanical score, a real human, and the Tenuto AI.
 
 ---
 
-## Quick Start
+## Local Quick Start
+
+If you want to run it locally, follow these steps:
 
 ### 1. Setup
 ```bash
@@ -25,32 +32,28 @@ cd tenuto
 pip install -r requirements.txt
 ```
 
-### 2. Test Run
+### 2. Download Datasets
+Automatically fetch the ASAP and PianoCoRe datasets (requires `huggingface_hub`):
 ```bash
-python -m src.train --model_type bigru --in_features 10 --epochs 2
+PYTHONPATH=. python -m src.download_dataset --dataset combined
 ```
 
 ### 3. Preprocess
-Drop `.xml` or `.mid` files in `./data/raw/`:
+Extract 40D features and ground-truth alignments from the raw XML/MIDI and Parquet files:
 ```bash
-python -m src.preprocess --raw_dir ./data/raw --processed_dir ./data/processed
+PYTHONPATH=. python -m src.preprocess --data_dir ./data --processed_dir ./data/processed
 ```
 
 ### 4. Train
-
-BiGRU:
+Train the full Transformer backbone:
 ```bash
-python -m src.train --model_type bigru --in_features 10 --epochs 10 --batch_size 16
+PYTHONPATH=. python -m src.train --model_type transformer --in_features 40 --epochs 20 --batch_size 16 --lr 1e-4
 ```
 
-Transformer:
+### 5. Predict (Inference)
+Feed a new flat score into the model to generate expressive MIDI:
 ```bash
-python -m src.train --model_type transformer --in_features 40 --epochs 20 --batch_size 16 --lr 1e-4
-```
-
-### 5. Predict
-```bash
-python -m src.infer --score sample.xml --checkpoint checkpoints/best_transformer_model.pth --model_type transformer
+PYTHONPATH=. python -m src.infer --score data/asap/Balakirev/Islamey/xml_score.musicxml --checkpoint checkpoints/best_transformer_model.pth --model_type transformer --output_midi output_expressive.mid
 ```
 
 ---
@@ -60,17 +63,19 @@ python -m src.infer --score sample.xml --checkpoint checkpoints/best_transformer
 ```
 tenuto/
 ├── notebooks/
-│   └── colab_training.ipynb
+│   └── colab_training.ipynb  <-- START HERE
 ├── src/
+│   ├── download_dataset.py
 │   ├── dataset.py
 │   ├── model.py
 │   ├── preprocess.py
+│   ├── features.py
+│   ├── alignment.py
+│   ├── audio.py
 │   ├── train.py
-│   ├── infer.py
-│   └── utils.py
+│   └── infer.py
 ├── data/
-│   ├── raw/
-│   └── processed/
+│   └── (Auto-populated by download script)
 ├── requirements.txt
 └── README.md
 ```
@@ -80,9 +85,9 @@ tenuto/
 ## How It Works
 
 - **Features (40D):** Extracted with `partitura` (pitch, duration, beat offset, dynamics, voicing).
-- **Backbone:** 6-layer Bidirectional Transformer Encoder.
+- **Backbone:** 6-layer Bidirectional Transformer Encoder (~5M Params).
 - **Outputs:** Tempo scale $S(b)$, timing shift $\Delta t$, velocity $v$, articulation scale $d$, pedal CC64.
-- **Loss:** Huber ($\Delta t$) + MSE (velocity) + 2nd-order smooth penalty on tempo scale.
+- **Loss:** Huber ($\Delta t$) + MSE (velocity, articulation, pedal) + 2nd-order smooth penalty on tempo scale.
 
 ---
 
