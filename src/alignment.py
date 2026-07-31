@@ -44,11 +44,30 @@ def compute_alignment_targets(score_path_or_array=None, perf_path_or_array=None)
     if score_notes is not None and perf_notes is not None and len(score_notes) > 0 and len(perf_notes) > 0:
         n = min(len(score_notes), len(perf_notes))
         
-        # 1. Extract Micro-Timing Shift
-        score_onsets = score_notes['onset_sec'][:n] if 'onset_sec' in score_notes.dtype.names else np.zeros(n)
+        # 1. Extract Micro-Timing Shift (\Delta t_i)
+        score_onsets = score_notes['onset_beat'][:n] if 'onset_beat' in score_notes.dtype.names else (score_notes['onset_sec'][:n] if 'onset_sec' in score_notes.dtype.names else np.linspace(0, n, n))
         perf_onsets = perf_notes['onset_sec'][:n] if 'onset_sec' in perf_notes.dtype.names else np.zeros(n)
-        delta_t = torch.tensor(perf_onsets - score_onsets, dtype=torch.float32)
-        delta_t = torch.clamp(delta_t, min=-0.025, max=0.025)
+        
+        if len(score_onsets) >= 4 and (score_onsets[-1] - score_onsets[0]) > 0:
+            sort_idx = np.argsort(score_onsets)
+            s_sorted = score_onsets[sort_idx]
+            p_sorted = perf_onsets[sort_idx]
+            
+            from scipy.interpolate import UnivariateSpline
+            try:
+                # Smooth macro rubato spline trend
+                spline = UnivariateSpline(s_sorted, p_sorted, s=0.5)
+                macro_onsets = spline(score_onsets)
+            except Exception:
+                p = np.polyfit(score_onsets, perf_onsets, 1)
+                macro_onsets = np.polyval(p, score_onsets)
+            
+            # Residual micro-timing shift: perf_onset - macro_onset
+            delta_t_raw = perf_onsets - macro_onsets
+        else:
+            delta_t_raw = np.zeros(n)
+
+        delta_t = torch.tensor(np.clip(delta_t_raw, -0.025, 0.025), dtype=torch.float32)
 
         # 2. Extract MIDI Velocity
         velocities = perf_notes['velocity'][:n] if 'velocity' in perf_notes.dtype.names else np.full(n, 64)
