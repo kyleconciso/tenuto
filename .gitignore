@@ -15,11 +15,13 @@ ENV/
 # Datasets and Weights
 data/
 datasets/
+storage/
 checkpoints/
 runs/
 *.pth
 *.pt
 *.onnx
+
 
 # IDE / OS
 .vscode/

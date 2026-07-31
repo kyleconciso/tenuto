@@ -10,6 +10,13 @@ from src.utils import set_seed, get_device, save_checkpoint
 from src.dataset import create_dataloaders
 from src.model import build_model
 
+try:
+    import torch_xla.core.xla_model as xm
+    import torch_xla.distributed.parallel_loader as pl
+except Exception:
+    xm = None
+    pl = None
+
 class TenutoLoss(nn.Module):
     r"""
     Multi-objective Loss for Tenuto Expressive AI Engine.
@@ -29,7 +36,7 @@ class TenutoLoss(nn.Module):
         L_smooth = \sum_b |(S_{b+1} - S_b) - (S_b - S_{b-1})|^2
         """
         if tempo_scale.size(1) < 3:
-            return torch.tensor(0.0, device=tempo_scale.device)
+            return tempo_scale.new_tensor(0.0)
         
         diff1 = tempo_scale[:, 1:] - tempo_scale[:, :-1]
         diff2 = diff1[:, 1:] - diff1[:, :-1]
@@ -38,13 +45,13 @@ class TenutoLoss(nn.Module):
     def forward(self, predictions, targets):
         loss_timing = self.huber(predictions["delta_t"], targets["delta_t"])
         loss_velocity = F.mse_loss(predictions["velocity"], targets["velocity"])
-        loss_articulation = F.mse_loss(predictions["articulation"], targets["articulation"]) if "articulation" in targets else torch.tensor(0.0, device=predictions["delta_t"].device)
-        loss_pedal = F.mse_loss(predictions["pedal"], targets["pedal"]) if "pedal" in targets else torch.tensor(0.0, device=predictions["delta_t"].device)
+        loss_articulation = F.mse_loss(predictions["articulation"], targets["articulation"]) if "articulation" in targets else predictions["delta_t"].new_tensor(0.0)
+        loss_pedal = F.mse_loss(predictions["pedal"], targets["pedal"]) if "pedal" in targets else predictions["delta_t"].new_tensor(0.0)
         
         if "tempo_scale" in predictions:
             loss_smooth = self.compute_smoothness_loss(predictions["tempo_scale"])
         else:
-            loss_smooth = torch.tensor(0.0, device=predictions["delta_t"].device)
+            loss_smooth = predictions["delta_t"].new_tensor(0.0)
 
         total_loss = (self.w_timing * loss_timing) + (self.w_velocity * loss_velocity) + loss_articulation + loss_pedal + (self.w_smooth * loss_smooth)
         
@@ -102,6 +109,8 @@ def train_epoch(model, dataloader, criterion, optimizer, device):
         loss.backward()
         torch.nn.utils.clip_grad_norm_(model.parameters(), max_norm=1.0)
         optimizer.step()
+        if xm is not None and getattr(device, 'type', None) == 'xla':
+            xm.mark_step()
 
         batch_size = x.size(0)
         total_loss_accum += loss_components["total_loss"] * batch_size
@@ -144,6 +153,9 @@ def validate(model, dataloader, criterion, device):
             total_samples += batch_size
             
             pbar.set_postfix(Loss=f"{loss_components['total_loss']:.4f}")
+
+    if xm is not None and getattr(device, 'type', None) == 'xla':
+        xm.mark_step()
 
     n = max(total_samples, 1)
     return total_loss_accum / n, timing_loss_accum / n, velocity_loss_accum / n, articulation_loss_accum / n, pedal_loss_accum / n
@@ -221,10 +233,17 @@ def main():
     train_loader, val_loader = create_dataloaders(args.data_dir, batch_size=args.batch_size)
     inspect_first_dataset_sample(train_loader)
 
+    if getattr(device, 'type', None) == 'xla' and pl is not None:
+        train_loader_exec = pl.ParallelLoader(train_loader, [device]).per_device_loader(device)
+        val_loader_exec = pl.ParallelLoader(val_loader, [device]).per_device_loader(device)
+    else:
+        train_loader_exec = train_loader
+        val_loader_exec = val_loader
+
     for epoch in range(start_epoch, args.epochs + 1):
         t0 = time.time()
-        train_loss, train_timing, train_vel, train_art, train_ped = train_epoch(model, train_loader, criterion, optimizer, device)
-        val_loss, val_timing, val_vel, val_art, val_ped = validate(model, val_loader, criterion, device)
+        train_loss, train_timing, train_vel, train_art, train_ped = train_epoch(model, train_loader_exec, criterion, optimizer, device)
+        val_loss, val_timing, val_vel, val_art, val_ped = validate(model, val_loader_exec, criterion, device)
         scheduler.step()
         
         elapsed = time.time() - t0

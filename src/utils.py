@@ -4,13 +4,21 @@ import numpy as np
 import torch
 
 def get_device():
-    """Returns the torch.device (CUDA if available, else CPU)."""
-    device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+    """Returns the torch.device (TPU/XLA if available, CUDA if available, else CPU)."""
+    try:
+        import torch_xla.core.xla_model as xm
+        device = xm.xla_device()
+        print(f"[Tenuto] Using TPU (XLA Device: {device})")
+        return device
+    except Exception:
+        pass
+
     if torch.cuda.is_available():
         print(f"[Tenuto] Using GPU: {torch.cuda.get_device_name(0)}")
+        return torch.device("cuda")
     else:
         print("[Tenuto] Using CPU")
-    return device
+        return torch.device("cpu")
 
 def set_seed(seed: int = 42):
     """Sets random seeds for reproducibility."""
@@ -22,6 +30,11 @@ def set_seed(seed: int = 42):
         torch.cuda.manual_seed_all(seed)
         torch.backends.cudnn.deterministic = True
         torch.backends.cudnn.benchmark = False
+    try:
+        import torch_xla.core.xla_model as xm
+        xm.set_rng_seed(seed)
+    except Exception:
+        pass
     print(f"[Tenuto] Random seed set to {seed}")
 
 def mount_google_drive(mount_point: str = "/content/drive"):

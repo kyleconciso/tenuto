@@ -32,7 +32,7 @@ PYTHONPATH=. python -m src.preprocess --data_dir ./data --processed_dir ./data/p
 ```
 
 ### 4. Train
-Train the full Transformer backbone:
+Train the full Transformer backbone (auto-detects Google Cloud TPU v5e-1 via `torch_xla`, NVIDIA GPUs, or CPU):
 ```bash
 PYTHONPATH=. python -m src.train --model_type transformer --in_features 40 --epochs 20 --batch_size 16 --lr 1e-4
 ```

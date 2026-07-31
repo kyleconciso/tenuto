@@ -9,3 +9,6 @@ tqdm
 matplotlib
 pillow
 scikit-learn
+jax
+flax
+optax
