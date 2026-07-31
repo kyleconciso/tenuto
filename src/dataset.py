@@ -13,6 +13,8 @@ class TenutoScoreDataset(Dataset):
         self.seq_len = seq_len
         self.in_features = in_features
         self.samples = []
+        self._file_cache = {}
+        self._max_cache_size = 500
 
         # Auto-detect preprocessed .pt files in data_dir
         raw_files = []
@@ -54,6 +56,14 @@ class TenutoScoreDataset(Dataset):
             return self.synthetic_num_samples
         return len(self.samples)
 
+    def _get_data(self, filepath):
+        if filepath in self._file_cache:
+            return self._file_cache[filepath]
+        data = torch.load(filepath, map_location="cpu")
+        if len(self._file_cache) < self._max_cache_size:
+            self._file_cache[filepath] = data
+        return data
+
     def __getitem__(self, idx):
         if hasattr(self, 'synthetic_num_samples'):
             # Synthetic 40D or 10D Note Feature Sequence X in R^(SeqLen x InFeatures)
@@ -78,7 +88,7 @@ class TenutoScoreDataset(Dataset):
             filepath = sample_info["path"]
             start_idx = sample_info["start_idx"]
             
-            data = torch.load(filepath, map_location="cpu")
+            data = self._get_data(filepath)
             x = data["x"]
             
             # Ensure x is 2D (SeqLen, InFeatures)
@@ -113,12 +123,13 @@ class TenutoScoreDataset(Dataset):
 
             return x_chunk, targets_chunk
 
-def create_dataloaders(data_dir: str, batch_size: int = 16, seq_len: int = 256, in_features: int = 40, num_workers: int = 0):
+def create_dataloaders(data_dir: str, batch_size: int = 16, seq_len: int = 256, in_features: int = 40, num_workers: int = 2):
     """Creates train and validation PyTorch DataLoaders for score sequences."""
     train_dataset = TenutoScoreDataset(os.path.join(data_dir, "train"), seq_len=seq_len, in_features=in_features)
     val_dataset = TenutoScoreDataset(os.path.join(data_dir, "val"), seq_len=seq_len, in_features=in_features)
 
-    train_loader = DataLoader(train_dataset, batch_size=batch_size, shuffle=True, num_workers=num_workers)
-    val_loader = DataLoader(val_dataset, batch_size=batch_size, shuffle=False, num_workers=num_workers)
+    nw = num_workers if (os.cpu_count() and os.cpu_count() > 1) else 0
+    train_loader = DataLoader(train_dataset, batch_size=batch_size, shuffle=True, num_workers=nw, pin_memory=True if nw > 0 else False)
+    val_loader = DataLoader(val_dataset, batch_size=batch_size, shuffle=False, num_workers=nw, pin_memory=True if nw > 0 else False)
 
     return train_loader, val_loader

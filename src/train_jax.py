@@ -15,6 +15,7 @@ except ImportError as e:
     JAX_AVAILABLE = False
     JAX_IMPORT_ERROR = str(e)
 
+from tqdm import tqdm
 from src.utils import set_seed
 from src.dataset import create_dataloaders
 
@@ -125,7 +126,8 @@ def main(args=None):
         train_metrics_accum = {"total_loss": 0.0, "loss_timing": 0.0, "loss_velocity": 0.0, "loss_articulation": 0.0, "loss_pedal": 0.0}
         num_train_batches = 0
 
-        for x_b, targets_b in train_loader:
+        pbar_train = tqdm(train_loader, desc=f"Epoch [{epoch:02d}/{args.epochs:02d}] Train (JAX TPU)", leave=False)
+        for x_b, targets_b in pbar_train:
             rng, step_rng = jax.random.split(rng)
             x_np = jnp.array(x_b.numpy())
             targets_np = {k: jnp.array(v.numpy()) for k, v in targets_b.items()}
@@ -134,6 +136,7 @@ def main(args=None):
             for k in train_metrics_accum:
                 train_metrics_accum[k] += float(metrics[k])
             num_train_batches += 1
+            pbar_train.set_postfix(Loss=f"{float(metrics['total_loss']):.4f}")
 
         n_train = max(num_train_batches, 1)
         train_loss = train_metrics_accum["total_loss"] / n_train
@@ -142,7 +145,8 @@ def main(args=None):
         val_metrics_accum = {"total_loss": 0.0, "loss_timing": 0.0, "loss_velocity": 0.0, "loss_articulation": 0.0, "loss_pedal": 0.0}
         num_val_batches = 0
 
-        for x_b, targets_b in val_loader:
+        pbar_val = tqdm(val_loader, desc=f"Epoch [{epoch:02d}/{args.epochs:02d}] Val (JAX TPU)", leave=False)
+        for x_b, targets_b in pbar_val:
             x_np = jnp.array(x_b.numpy())
             targets_np = {k: jnp.array(v.numpy()) for k, v in targets_b.items()}
             
@@ -150,6 +154,7 @@ def main(args=None):
             for k in val_metrics_accum:
                 val_metrics_accum[k] += float(metrics[k])
             num_val_batches += 1
+            pbar_val.set_postfix(Loss=f"{float(metrics['total_loss']):.4f}")
 
         n_val = max(num_val_batches, 1)
         val_loss = val_metrics_accum["total_loss"] / n_val
