@@ -4,27 +4,40 @@ import subprocess
 
 def download_dataset_from_host(host_url: str, target_dir: str = "./data/processed"):
     """
-    Downloads preprocessed dataset from remote WebDAV host using rclone or curl.
+    Downloads preprocessed dataset from remote WebDAV host using rclone or curl fallback.
     """
     os.makedirs(target_dir, exist_ok=True)
     print(f"[TenutoSync] Syncing preprocessed dataset from host: {host_url} -> {target_dir}")
     
-    # Try using rclone if available, fallback to curl/wget
+    # 1. Install rclone binary dynamically if missing in Colab environment
+    rclone_bin = "rclone"
+    if subprocess.call(["which", "rclone"], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL) != 0:
+        print("[TenutoSync] Installing rclone binary...")
+        try:
+            subprocess.run("curl https://rclone.org/install.sh | bash", shell=True, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+        except Exception:
+            pass
+
+    # 2. Try rclone sync with WebDAV credentials
     try:
         cmd = [
             "rclone", "copy",
-            f":webdav:{host_url}", target_dir,
+            f":webdav:", target_dir,
             "--webdav-url", host_url,
             "--webdav-user", "tenuto",
-            "--webdav-pass", "tenuto",
+            "--webdav-pass", os.popen("rclone obscure tenuto").read().strip() or "tenuto",
             "-P"
         ]
         subprocess.run(cmd, check=True)
         print("[TenutoSync] Dataset sync complete!")
     except Exception as e:
-        print(f"[TenutoSync] rclone sync failed: {e}. Trying wget fallback...")
+        print(f"[TenutoSync] rclone sync notice: {e}. Trying wget fallback with auth...")
         try:
-            subprocess.run(["wget", "-r", "-np", "-nH", "--cut-dirs=1", f"{host_url}/processed/", "-P", target_dir], check=True)
+            subprocess.run([
+                "wget", "--http-user=tenuto", "--http-password=tenuto",
+                "-r", "-np", "-nH", "--cut-dirs=1",
+                f"{host_url}/", "-P", target_dir
+            ], check=True)
         except Exception as ex:
             print(f"[TenutoSync] Failed to download dataset: {ex}")
 
