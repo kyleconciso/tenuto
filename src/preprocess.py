@@ -179,7 +179,7 @@ def main():
     parser = argparse.ArgumentParser(description="Preprocess Combined ASAP + PianoCoRe Dataset")
     parser.add_argument("--data_dir", type=str, default="./data", help="Root data directory")
     parser.add_argument("--processed_dir", type=str, default="./data/processed", help="Processed output directory")
-    parser.add_argument("--max_samples", type=int, default=None, help="Optional max sample limit")
+    parser.add_argument("--max_samples", type=int, default=10000, help="Optional max sample limit (default: 10000)")
     parser.add_argument("--force", action="store_true", help="Force re-processing")
     args = parser.parse_args()
 
