@@ -160,7 +160,7 @@ def validate(model, dataloader, criterion, device):
     n = max(total_samples, 1)
     return total_loss_accum / n, timing_loss_accum / n, velocity_loss_accum / n, articulation_loss_accum / n, pedal_loss_accum / n
 
-def main():
+def main(args=None):
     parser = argparse.ArgumentParser(description="Tenuto Expressive Score-to-Performance AI Training")
     parser.add_argument("--data_dir", type=str, default="./data/processed", help="Path to preprocessed dataset")
     parser.add_argument("--model_type", type=str, default="transformer", choices=["transformer", "bigru"])
@@ -170,7 +170,8 @@ def main():
     parser.add_argument("--lr", type=float, default=1e-4, help="Learning rate")
     parser.add_argument("--seed", type=int, default=42, help="Random seed for reproducibility")
     parser.add_argument("--host_url", type=str, default=None, help="Optional self-hosted storage WebDAV URL to backup checkpoints")
-    args = parser.parse_args()
+    parsed_args = parser.parse_args(args)
+    args = parsed_args
 
     set_seed(args.seed)
     device = get_device()

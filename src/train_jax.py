@@ -51,7 +51,7 @@ def compute_loss_jax(params, model, batch, w_timing=100.0, w_velocity=1.0, w_smo
         "loss_smooth": loss_smooth
     }
 
-def main():
+def main(args=None):
     parser = argparse.ArgumentParser(description="Tenuto JAX/Flax Training on TPU v5e-1")
     parser.add_argument("--data_dir", type=str, default="./data/processed", help="Path to preprocessed dataset")
     parser.add_argument("--in_features", type=int, default=40, help="Input feature dimension")
@@ -59,7 +59,8 @@ def main():
     parser.add_argument("--batch_size", type=int, default=16, help="Batch size for TPU training")
     parser.add_argument("--lr", type=float, default=1e-4, help="Learning rate")
     parser.add_argument("--seed", type=int, default=42, help="Random seed")
-    args = parser.parse_args()
+    parsed_args = parser.parse_args(args)
+    args = parsed_args
 
     if not JAX_AVAILABLE:
         print(f"[TenutoJAX] ❌ JAX/Flax is not installed in this environment.")
