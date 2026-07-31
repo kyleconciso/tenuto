@@ -91,7 +91,8 @@ def train_epoch(model, dataloader, criterion, optimizer, device):
     pedal_loss_accum = 0.0
     total_samples = 0
 
-    for x, targets in tqdm(dataloader, desc="Training", leave=False):
+    pbar = tqdm(dataloader, desc="Training", leave=False)
+    for x, targets in pbar:
         x = x.to(device)
         targets = {k: v.to(device) for k, v in targets.items()}
 
@@ -109,6 +110,9 @@ def train_epoch(model, dataloader, criterion, optimizer, device):
         articulation_loss_accum += loss_components["loss_articulation"] * batch_size
         pedal_loss_accum += loss_components["loss_pedal"] * batch_size
         total_samples += batch_size
+        
+        # Update progress bar with current loss
+        pbar.set_postfix(Loss=f"{loss_components['total_loss']:.4f}")
 
     n = max(total_samples, 1)
     return total_loss_accum / n, timing_loss_accum / n, velocity_loss_accum / n, articulation_loss_accum / n, pedal_loss_accum / n
@@ -123,7 +127,8 @@ def validate(model, dataloader, criterion, device):
     total_samples = 0
 
     with torch.no_grad():
-        for x, targets in tqdm(dataloader, desc="Validation", leave=False):
+        pbar = tqdm(dataloader, desc="Validation", leave=False)
+        for x, targets in pbar:
             x = x.to(device)
             targets = {k: v.to(device) for k, v in targets.items()}
 
@@ -137,6 +142,8 @@ def validate(model, dataloader, criterion, device):
             articulation_loss_accum += loss_components["loss_articulation"] * batch_size
             pedal_loss_accum += loss_components["loss_pedal"] * batch_size
             total_samples += batch_size
+            
+            pbar.set_postfix(Loss=f"{loss_components['total_loss']:.4f}")
 
     n = max(total_samples, 1)
     return total_loss_accum / n, timing_loss_accum / n, velocity_loss_accum / n, articulation_loss_accum / n, pedal_loss_accum / n
