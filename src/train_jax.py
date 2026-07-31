@@ -61,7 +61,9 @@ def main(args=None):
     parser = argparse.ArgumentParser(description="Tenuto JAX/Flax Training on TPU v5e-1")
     parser.add_argument("--data_dir", type=str, default="./data/processed", help="Path to preprocessed dataset")
     parser.add_argument("--in_features", type=int, default=40, help="Input feature dimension")
-    parser.add_argument("--epochs", type=int, default=20, help="Number of training epochs")
+    parser.add_argument("--epochs", type=int, default=40, help="Maximum number of training epochs")
+    parser.add_argument("--patience", type=int, default=8, help="Generous early stopping patience (epochs)")
+    parser.add_argument("--min_delta", type=float, default=1e-4, help="Minimum validation loss improvement threshold")
     parser.add_argument("--batch_size", type=int, default=16, help="Batch size for TPU training")
     parser.add_argument("--lr", type=float, default=5e-4, help="Learning rate")
     parser.add_argument("--seed", type=int, default=42, help="Random seed")
@@ -234,8 +236,9 @@ def main(args=None):
             import shutil
             shutil.copy(latest_local, os.path.join(gdrive_dir, "latest_transformer_jax.msgpack"))
 
-        if val_loss < best_val_loss:
+        if val_loss < (best_val_loss - args.min_delta):
             best_val_loss = val_loss
+            patience_counter = 0
             best_local = "checkpoints/best_transformer_jax.msgpack"
             with open(best_local, "wb") as f:
                 f.write(ckpt_bytes)
@@ -244,6 +247,12 @@ def main(args=None):
             if os.path.exists("/content/drive/MyDrive"):
                 import shutil
                 shutil.copy(best_local, os.path.join(gdrive_dir, "best_transformer_jax.msgpack"))
+        else:
+            patience_counter += 1
+            if patience_counter >= args.patience and epoch > 3:
+                print(f"\n[TenutoJAX] 🛑 Generous Early Stopping Triggered! Validation loss did not improve by >{args.min_delta} for {args.patience} consecutive epochs.")
+                print(f"[TenutoJAX] Peak Validation Loss Achieved: {best_val_loss:.4f}")
+                break
 
 if __name__ == "__main__":
     main()
