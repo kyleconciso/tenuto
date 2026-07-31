@@ -181,7 +181,23 @@ def main():
     best_ckpt_path = f"checkpoints/best_{args.model_type}_model.pth"
     checkpoint_path = latest_ckpt_path if os.path.exists(latest_ckpt_path) else (best_ckpt_path if os.path.exists(best_ckpt_path) else None)
 
-    # If no local checkpoint found, check Hugging Face Model Hub
+    # 1. Check Google Drive for existing checkpoints first (Policy-Safe GDrive Integration)
+    gdrive_ckpt_dir = "/content/drive/MyDrive/Tenuto/checkpoints"
+    if os.path.exists(gdrive_ckpt_dir):
+        gdrive_latest = os.path.join(gdrive_ckpt_dir, f"latest_{args.model_type}_model.pth")
+        gdrive_best = os.path.join(gdrive_ckpt_dir, f"best_{args.model_type}_model.pth")
+        if os.path.exists(gdrive_latest):
+            import shutil
+            shutil.copy(gdrive_latest, latest_ckpt_path)
+            checkpoint_path = latest_ckpt_path
+            print(f"[Tenuto] Found latest checkpoint in Google Drive! Synced to {latest_ckpt_path}")
+        elif os.path.exists(gdrive_best):
+            import shutil
+            shutil.copy(gdrive_best, best_ckpt_path)
+            checkpoint_path = best_ckpt_path
+            print(f"[Tenuto] Found best checkpoint in Google Drive! Synced to {best_ckpt_path}")
+
+    # 2. Fallback to Hugging Face or Host Storage
     if checkpoint_path is None:
         try:
             from src.sync import download_checkpoint_from_hf
@@ -189,19 +205,6 @@ def main():
             if hf_ckpt and os.path.exists(hf_ckpt):
                 checkpoint_path = hf_ckpt
                 print(f"[Tenuto] Downloaded latest checkpoint from Hugging Face Hub!")
-        except Exception:
-            pass
-
-    # If still no checkpoint, attempt self-hosted storage fallback
-    host_url = args.host_url or os.environ.get("HOST_STORAGE_URL")
-    if checkpoint_path is None and host_url:
-        try:
-            print(f"[Tenuto] Checking remote storage server for existing checkpoints...")
-            import subprocess
-            subprocess.run(["curl", "-s", "-f", "-u", "tenuto:tenuto", "-o", latest_ckpt_path, f"{host_url}/latest_{args.model_type}_model.pth"], check=True)
-            if os.path.exists(latest_ckpt_path):
-                checkpoint_path = latest_ckpt_path
-                print(f"[Tenuto] Downloaded latest checkpoint from storage host!")
         except Exception:
             pass
 
@@ -233,7 +236,7 @@ def main():
         print(f"  ├── Train Loss : {train_loss:.4f} | Timing: {train_timing:.5f}s | Vel: {train_vel:.2f} | Art: {train_art:.2f} | Ped: {train_ped:.2f}")
         print(f"  └── Val Loss   : {val_loss:.4f} | Timing: {val_timing:.5f}s | Vel: {val_vel:.2f} | Art: {val_art:.2f} | Ped: {val_ped:.2f}")
 
-        # 1. Always save latest checkpoint per epoch for guaranteed resumability
+        # 1. Always save latest checkpoint per epoch
         latest_ckpt = f"latest_{args.model_type}_model.pth"
         save_checkpoint({
             'epoch': epoch,
@@ -253,25 +256,14 @@ def main():
                 'best_val_loss': best_val_loss,
             }, filename=best_ckpt)
 
-        # 3. Sync checkpoints to Hugging Face Model Hub (Policy-Safe)
-        try:
-            from src.sync import upload_checkpoint_to_hf
-            upload_checkpoint_to_hf(f"checkpoints/{latest_ckpt}")
+        # 3. Auto-sync checkpoints to Google Drive if mounted
+        if os.path.exists("/content/drive/MyDrive"):
+            os.makedirs(gdrive_ckpt_dir, exist_ok=True)
+            import shutil
+            shutil.copy(f"checkpoints/{latest_ckpt}", os.path.join(gdrive_ckpt_dir, latest_ckpt))
             if val_loss == best_val_loss:
-                upload_checkpoint_to_hf(f"checkpoints/best_{args.model_type}_model.pth")
-        except Exception:
-            pass
-
-        # 4. Optional WebDAV Host Storage fallback
-        host_url = args.host_url or os.environ.get("HOST_STORAGE_URL")
-        if host_url:
-            try:
-                from src.sync import upload_checkpoint_to_host
-                upload_checkpoint_to_host(host_url, f"checkpoints/{latest_ckpt}")
-                if val_loss == best_val_loss:
-                    upload_checkpoint_to_host(host_url, f"checkpoints/best_{args.model_type}_model.pth")
-            except Exception as e:
-                print(f"[Tenuto] Host sync notice: {e}")
+                shutil.copy(f"checkpoints/best_{args.model_type}_model.pth", os.path.join(gdrive_ckpt_dir, f"best_{args.model_type}_model.pth"))
+            print(f"[Tenuto] Saved checkpoint to Google Drive: {gdrive_ckpt_dir}")
 
 if __name__ == "__main__":
     main()
