@@ -36,11 +36,7 @@ def mount_google_drive(mount_point: str = "/content/drive"):
         return False
 
 def get_checkpoint_dir():
-    """Returns Google Drive checkpoint path if mounted, else local directory."""
-    gdrive_dir = "/content/drive/MyDrive/tenuto_checkpoints"
-    if os.path.exists("/content/drive/MyDrive"):
-        os.makedirs(gdrive_dir, exist_ok=True)
-        return gdrive_dir
+    """Returns local checkpoints directory (synced automatically to self-hosted storage if configured)."""
     local_dir = "checkpoints"
     os.makedirs(local_dir, exist_ok=True)
     return local_dir
