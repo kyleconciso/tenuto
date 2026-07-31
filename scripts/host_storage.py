@@ -84,14 +84,43 @@ def start_storage_host(port=8080, storage_dir="./storage"):
     else:
         print("Could not retrieve public URL from tunnel log. Check output above.")
 
+    def cleanup_and_exit(signum=None, frame=None):
+        print("\n[TenutoStorage] Stopping storage server & active tunnel processes...")
+        try:
+            rclone_proc.terminate()
+            ssh_proc.terminate()
+            rclone_proc.wait(timeout=2)
+            ssh_proc.wait(timeout=2)
+        except Exception:
+            pass
+        clean_stale_processes()
+        print("[TenutoStorage] Server stopped cleanly.")
+        sys.exit(0)
+
+    import signal
+    signal.signal(signal.SIGINT, cleanup_and_exit)
+    signal.signal(signal.SIGTERM, cleanup_and_exit)
+    if hasattr(signal, "SIGHUP"):
+        signal.signal(signal.SIGHUP, cleanup_and_exit)
+
     try:
         while True:
             time.sleep(1)
     except KeyboardInterrupt:
-        print("\nShutting down Tenuto storage server...")
-        rclone_proc.terminate()
-        ssh_proc.terminate()
-        print("Server stopped cleanly.")
+        cleanup_and_exit()
+
+def main():
+    import argparse
+    parser = argparse.ArgumentParser(description="Tenuto Storage Server Host")
+    parser.add_argument("--stop", action="store_true", help="Stop any running background storage server")
+    args = parser.parse_args()
+
+    if args.stop:
+        clean_stale_processes()
+        print("[TenutoStorage] All background storage processes stopped.")
+        sys.exit(0)
+
+    start_storage_host()
 
 if __name__ == "__main__":
-    start_storage_host()
+    main()
