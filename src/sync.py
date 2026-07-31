@@ -18,23 +18,29 @@ def download_dataset_from_host(host_url: str, target_dir: str = "./data/processe
         except Exception:
             pass
 
-    # 2. Try rclone sync with WebDAV credentials
+    # 2. Try rclone sync with WebDAV credentials and live progress stats
     try:
         pass_obs = os.popen("rclone obscure tenuto").read().strip() or "tenuto"
         connection_str = f':webdav,url="{host_url}",user="tenuto",pass="{pass_obs}":'
         cmd = [
             "rclone", "copy",
             connection_str, target_dir,
-            "-P"
+            "-P",
+            "--stats", "2s",
+            "--stats-one-line",
+            "--transfers", "16",
+            "--checkers", "16"
         ]
+        print("[TenutoSync] Starting high-speed parallel sync (16 streams)...")
         subprocess.run(cmd, check=True)
-        print("[TenutoSync] Dataset sync complete!")
+        print("\n[TenutoSync] Dataset sync complete!")
     except Exception as e:
         print(f"[TenutoSync] rclone sync notice: {e}. Trying wget fallback with auth...")
         try:
             subprocess.run([
                 "wget", "--http-user=tenuto", "--http-password=tenuto",
                 "-r", "-np", "-nH", "--cut-dirs=1",
+                "--show-progress",
                 f"{host_url}/", "-P", target_dir
             ], check=True)
         except Exception as ex:
