@@ -101,6 +101,44 @@ def main(args=None):
         tx=tx
     )
 
+    # Auto-resume from Google Drive or local checkpoints
+    gdrive_dir = "/content/drive/MyDrive/Tenuto/checkpoints"
+    os.makedirs("checkpoints", exist_ok=True)
+
+    candidates = [
+        os.path.join(gdrive_dir, "latest_transformer_jax.msgpack"),
+        os.path.join(gdrive_dir, "best_transformer_jax.msgpack"),
+        "checkpoints/latest_transformer_jax.msgpack",
+        "checkpoints/best_transformer_jax.msgpack"
+    ]
+
+    loaded_ckpt = None
+    for path in candidates:
+        if os.path.exists(path):
+            loaded_ckpt = path
+            break
+
+    start_epoch = 1
+    best_val_loss = float('inf')
+
+    if loaded_ckpt:
+        try:
+            print(f"[TenutoJAX] Checkpoint found! Auto-resuming from: '{loaded_ckpt}'")
+            with open(loaded_ckpt, "rb") as f:
+                ckpt_bytes = f.read()
+            restored = flax.serialization.msgpack_restore(ckpt_bytes)
+            if isinstance(restored, dict) and "params" in restored:
+                state = state.replace(params=flax.serialization.from_state_dict(state.params, restored["params"]))
+                start_epoch = restored.get("epoch", 0) + 1
+                best_val_loss = restored.get("best_val_loss", float('inf'))
+            else:
+                state = state.replace(params=flax.serialization.from_state_dict(state.params, restored))
+            print(f"[TenutoJAX] ✅ Successfully resumed training from Epoch {start_epoch} (Best Val Loss: {best_val_loss:.4f})")
+        except Exception as e:
+            print(f"[TenutoJAX] Warning: Could not restore checkpoint from {loaded_ckpt}: {e}")
+    else:
+        print("[TenutoJAX] No prior JAX checkpoint found. Starting fresh from Epoch 1.")
+
     # JIT-compiled Train and Val Steps
     @jax.jit
     def train_step(state, batch, rng_key):
@@ -116,10 +154,8 @@ def main(args=None):
 
     train_loader, val_loader = create_dataloaders(args.data_dir, batch_size=args.batch_size)
 
-    best_val_loss = float('inf')
-
-    print(f"[TenutoJAX] Starting TPU v5e-1 training loop for {args.epochs} epochs...")
-    for epoch in range(1, args.epochs + 1):
+    print(f"[TenutoJAX] Starting TPU v5e-1 training loop for epochs {start_epoch} to {args.epochs}...")
+    for epoch in range(start_epoch, args.epochs + 1):
         t0 = time.time()
         
         # Training loop
@@ -159,6 +195,7 @@ def main(args=None):
         n_val = max(num_val_batches, 1)
         val_loss = val_metrics_accum["total_loss"] / n_val
 
+        elapsed = time.time() - t0
         train_timing_ms = (train_metrics_accum['loss_timing'] / n_train) * 1000.0
         train_vel_rmse = np.sqrt(train_metrics_accum['loss_velocity'] / n_train)
         val_timing_ms = (val_metrics_accum['loss_timing'] / n_val) * 1000.0
@@ -168,22 +205,33 @@ def main(args=None):
         print(f"  ├── Train Loss : {train_loss:.4f} | Timing Huber: {train_timing_ms:.3f}ms | Vel RMSE: {train_vel_rmse:.2f} steps")
         print(f"  └── Val Loss   : {val_loss:.4f} | Timing Huber: {val_timing_ms:.3f}ms | Vel RMSE: {val_vel_rmse:.2f} steps")
 
-        # Save Checkpoint
-        os.makedirs("checkpoints", exist_ok=True)
+        # Save Checkpoint per Epoch (Latest & Best)
+        ckpt_dict = {
+            "epoch": epoch,
+            "params": flax.serialization.to_state_dict(state.params),
+            "best_val_loss": best_val_loss
+        }
+        ckpt_bytes = flax.serialization.msgpack_serialize(ckpt_dict)
+        
+        latest_local = "checkpoints/latest_transformer_jax.msgpack"
+        with open(latest_local, "wb") as f:
+            f.write(ckpt_bytes)
+
+        if os.path.exists("/content/drive/MyDrive"):
+            os.makedirs(gdrive_dir, exist_ok=True)
+            import shutil
+            shutil.copy(latest_local, os.path.join(gdrive_dir, "latest_transformer_jax.msgpack"))
+
         if val_loss < best_val_loss:
             best_val_loss = val_loss
-            ckpt_bytes = flax.serialization.to_bytes(state.params)
-            local_ckpt = "checkpoints/best_transformer_jax.msgpack"
-            with open(local_ckpt, "wb") as f:
+            best_local = "checkpoints/best_transformer_jax.msgpack"
+            with open(best_local, "wb") as f:
                 f.write(ckpt_bytes)
-            print(f"[TenutoJAX] Saved best JAX model checkpoint (Val Loss: {best_val_loss:.4f})")
+            print(f"[TenutoJAX] 🏆 Saved new best JAX model checkpoint (Val Loss: {best_val_loss:.4f})")
 
-            gdrive_dir = "/content/drive/MyDrive/Tenuto/checkpoints"
             if os.path.exists("/content/drive/MyDrive"):
-                os.makedirs(gdrive_dir, exist_ok=True)
                 import shutil
-                shutil.copy(local_ckpt, os.path.join(gdrive_dir, "best_transformer_jax.msgpack"))
-                print(f"[TenutoJAX] Synced checkpoint to Google Drive: {gdrive_dir}")
+                shutil.copy(best_local, os.path.join(gdrive_dir, "best_transformer_jax.msgpack"))
 
 if __name__ == "__main__":
     main()
