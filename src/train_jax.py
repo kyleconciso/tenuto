@@ -30,23 +30,28 @@ def compute_smoothness_loss_jax(tempo_scale):
     diff2 = diff1[:, 1:] - diff1[:, :-1]
     return jnp.mean(jnp.square(diff2))
 
-def compute_loss_jax(params, model, batch, w_timing=100.0, w_velocity=1.0, w_smooth=10.0, rng=None):
+def compute_loss_jax(params, model, batch, w_timing=100.0, w_velocity=10.0, w_smooth=10.0, rng=None):
     x, targets = batch
     preds = model.apply({'params': params}, x, deterministic=True, rngs={'dropout': rng} if rng is not None else None)
     
+    # 1. Micro-timing Huber loss (\Delta t)
     loss_timing = jnp.mean(huber_loss_jax(preds["delta_t"], targets["delta_t"]))
-    loss_velocity = jnp.mean(jnp.square(preds["velocity"] - targets["velocity"]))
     
+    # 2. Velocity normalized loss (v / 127.0) & raw velocity MSE
+    raw_vel_mse = jnp.mean(jnp.square(preds["velocity"] - targets["velocity"]))
+    norm_vel_loss = raw_vel_mse / (127.0 ** 2)
+    
+    # 3. Articulation & Pedal losses
     loss_art = jnp.mean(jnp.square(preds["articulation"] - targets["articulation"])) if "articulation" in targets else 0.0
-    loss_ped = jnp.mean(jnp.square(preds["pedal"] - targets["pedal"])) if "pedal" in targets else 0.0
+    loss_ped = jnp.mean(jnp.square(preds["pedal"] - targets["pedal"] / 127.0)) if "pedal" in targets else 0.0
     loss_smooth = compute_smoothness_loss_jax(preds["tempo_scale"]) if "tempo_scale" in preds else 0.0
 
-    total_loss = (w_timing * loss_timing) + (w_velocity * loss_velocity) + loss_art + loss_ped + (w_smooth * loss_smooth)
+    total_loss = (w_timing * loss_timing) + (w_velocity * norm_vel_loss) + loss_art + loss_ped + (w_smooth * loss_smooth)
     
     return total_loss, {
         "total_loss": total_loss,
         "loss_timing": loss_timing,
-        "loss_velocity": loss_velocity,
+        "loss_velocity": raw_vel_mse,
         "loss_articulation": loss_art,
         "loss_pedal": loss_ped,
         "loss_smooth": loss_smooth
@@ -58,7 +63,7 @@ def main(args=None):
     parser.add_argument("--in_features", type=int, default=40, help="Input feature dimension")
     parser.add_argument("--epochs", type=int, default=20, help="Number of training epochs")
     parser.add_argument("--batch_size", type=int, default=16, help="Batch size for TPU training")
-    parser.add_argument("--lr", type=float, default=1e-4, help="Learning rate")
+    parser.add_argument("--lr", type=float, default=5e-4, help="Learning rate")
     parser.add_argument("--seed", type=int, default=42, help="Random seed")
     parsed_args = parser.parse_args(args)
     args = parsed_args
@@ -87,9 +92,16 @@ def main(args=None):
     rng, init_rng = jax.random.split(rng)
     params = model.init(init_rng, dummy_input, deterministic=True)['params']
 
-    # Optax Optimizer with Cosine Decay
-    total_steps = args.epochs * 100 # approximate step count fallback
-    schedule = optax.cosine_decay_schedule(init_value=args.lr, decay_steps=total_steps)
+    # Optax Optimizer with Warmup + Cosine Decay
+    total_steps = args.epochs * 7634
+    warmup_steps = int(0.05 * total_steps)
+    schedule = optax.warmup_cosine_decay_schedule(
+        init_value=1e-5,
+        peak_value=args.lr,
+        warmup_steps=warmup_steps,
+        decay_steps=total_steps,
+        end_value=1e-5
+    )
     tx = optax.chain(
         optax.clip_by_global_norm(1.0),
         optax.adamw(learning_rate=schedule, weight_decay=1e-4)
