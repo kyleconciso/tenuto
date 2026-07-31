@@ -206,24 +206,36 @@ def main():
         print(f"  ├── Train Loss : {train_loss:.4f} | Timing: {train_timing:.5f}s | Vel: {train_vel:.2f} | Art: {train_art:.2f} | Ped: {train_ped:.2f}")
         print(f"  └── Val Loss   : {val_loss:.4f} | Timing: {val_timing:.5f}s | Vel: {val_vel:.2f} | Art: {val_art:.2f} | Ped: {val_ped:.2f}")
 
+        # 1. Always save latest checkpoint per epoch for guaranteed resumability
+        latest_ckpt = f"latest_{args.model_type}_model.pth"
+        save_checkpoint({
+            'epoch': epoch,
+            'state_dict': model.state_dict(),
+            'optimizer': optimizer.state_dict(),
+            'best_val_loss': best_val_loss,
+        }, filename=latest_ckpt)
+
+        # 2. Save best checkpoint when validation loss improves
         if val_loss < best_val_loss:
             best_val_loss = val_loss
-            ckpt_path = f"best_{args.model_type}_model.pth"
+            best_ckpt = f"best_{args.model_type}_model.pth"
             save_checkpoint({
                 'epoch': epoch,
                 'state_dict': model.state_dict(),
                 'optimizer': optimizer.state_dict(),
                 'best_val_loss': best_val_loss,
-            }, filename=ckpt_path)
-            
-            # If host_url is provided, sync checkpoint to local host server
-            host_url = args.host_url or os.environ.get("HOST_STORAGE_URL")
-            if host_url:
-                try:
-                    from src.sync import upload_checkpoint_to_host
-                    upload_checkpoint_to_host(host_url, f"checkpoints/{ckpt_path}")
-                except Exception as e:
-                    print(f"[Tenuto] Host sync notice: {e}")
+            }, filename=best_ckpt)
+
+        # 3. Upload checkpoints to self-hosted storage server
+        host_url = args.host_url or os.environ.get("HOST_STORAGE_URL")
+        if host_url:
+            try:
+                from src.sync import upload_checkpoint_to_host
+                upload_checkpoint_to_host(host_url, f"checkpoints/{latest_ckpt}")
+                if val_loss == best_val_loss:
+                    upload_checkpoint_to_host(host_url, f"checkpoints/best_{args.model_type}_model.pth")
+            except Exception as e:
+                print(f"[Tenuto] Host sync notice: {e}")
 
 if __name__ == "__main__":
     main()
