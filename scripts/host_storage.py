@@ -4,7 +4,19 @@ import time
 import re
 import subprocess
 
+def clean_stale_processes():
+    """Cleans up any leftover rclone webdav or localhost.run SSH tunnel processes on port 8080."""
+    try:
+        # Kill stale localhost.run ssh tunnels
+        subprocess.run(["pkill", "-f", "nokey@localhost.run"], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+        # Kill stale rclone serve webdav instances on port 8080
+        subprocess.run(["pkill", "-f", "rclone serve webdav"], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+        time.sleep(0.5)
+    except Exception:
+        pass
+
 def start_storage_host(port=8080, storage_dir="./storage"):
+    clean_stale_processes()
     os.makedirs(storage_dir, exist_ok=True)
     abs_storage = os.path.abspath(storage_dir)
 
