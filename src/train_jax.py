@@ -19,6 +19,50 @@ from tqdm import tqdm
 from src.utils import set_seed
 from src.dataset import create_dataloaders
 
+import json
+import shutil
+
+class TenutoLogger:
+    def __init__(self, log_dir="logs", gdrive_log_dir="/content/drive/MyDrive/Tenuto/logs"):
+        self.log_dir = log_dir
+        self.gdrive_log_dir = gdrive_log_dir
+        os.makedirs(self.log_dir, exist_ok=True)
+        self.history_file = os.path.join(self.log_dir, "training_history.json")
+        self.gdrive_history_file = os.path.join(self.gdrive_log_dir, "training_history.json") if os.path.exists("/content/drive/MyDrive") else None
+        self.history = self.load_history()
+
+    def load_history(self):
+        candidates = [self.history_file]
+        if self.gdrive_history_file:
+            candidates.insert(0, self.gdrive_history_file)
+        
+        for p in candidates:
+            if os.path.exists(p):
+                try:
+                    with open(p, "r") as f:
+                        data = json.load(f)
+                    if isinstance(data, list):
+                        return data
+                except Exception:
+                    pass
+        return []
+
+    def log_epoch(self, epoch_data):
+        epoch_num = epoch_data["epoch"]
+        self.history = [item for item in self.history if item.get("epoch") != epoch_num]
+        self.history.append(epoch_data)
+        self.history.sort(key=lambda x: x.get("epoch", 0))
+
+        with open(self.history_file, "w") as f:
+            json.dump(self.history, f, indent=2)
+
+        if self.gdrive_history_file:
+            try:
+                os.makedirs(self.gdrive_log_dir, exist_ok=True)
+                shutil.copy(self.history_file, self.gdrive_history_file)
+            except Exception:
+                pass
+
 def huber_loss_jax(pred, target, delta=0.005):
     err = jnp.abs(pred - target)
     return jnp.where(err <= delta, 0.5 * (err ** 2), delta * (err - 0.5 * delta))
@@ -114,6 +158,8 @@ def main(args=None):
         params=params,
         tx=tx
     )
+
+    logger = TenutoLogger()
 
     # Auto-resume from Google Drive or local checkpoints
     gdrive_dir = "/content/drive/MyDrive/Tenuto/checkpoints"
@@ -236,7 +282,8 @@ def main(args=None):
             import shutil
             shutil.copy(latest_local, os.path.join(gdrive_dir, "latest_transformer_jax.msgpack"))
 
-        if val_loss < (best_val_loss - args.min_delta):
+        is_best_epoch = val_loss < (best_val_loss - args.min_delta)
+        if is_best_epoch:
             best_val_loss = val_loss
             patience_counter = 0
             best_local = "checkpoints/best_transformer_jax.msgpack"
@@ -249,10 +296,30 @@ def main(args=None):
                 shutil.copy(best_local, os.path.join(gdrive_dir, "best_transformer_jax.msgpack"))
         else:
             patience_counter += 1
-            if patience_counter >= args.patience and epoch > 3:
-                print(f"\n[TenutoJAX] 🛑 Generous Early Stopping Triggered! Validation loss did not improve by >{args.min_delta} for {args.patience} consecutive epochs.")
-                print(f"[TenutoJAX] Peak Validation Loss Achieved: {best_val_loss:.4f}")
-                break
+
+        # Idempotent JSON Logging
+        logger.log_epoch({
+            "epoch": epoch,
+            "timestamp": time.strftime("%Y-%m-%d %H:%M:%S"),
+            "learning_rate": float(schedule(state.step)),
+            "train_loss": float(train_loss),
+            "val_loss": float(val_loss),
+            "train_timing_ms": float(train_timing_ms),
+            "val_timing_ms": float(val_timing_ms),
+            "train_vel_rmse": float(train_vel_rmse),
+            "val_vel_rmse": float(val_vel_rmse),
+            "train_art_loss": float(train_metrics_accum["loss_articulation"] / n_train),
+            "val_art_loss": float(val_metrics_accum["loss_articulation"] / n_val),
+            "train_ped_loss": float(train_metrics_accum["loss_pedal"] / n_train),
+            "val_ped_loss": float(val_metrics_accum["loss_pedal"] / n_val),
+            "elapsed_sec": float(elapsed),
+            "is_best": is_best_epoch
+        })
+
+        if patience_counter >= args.patience and epoch > 3:
+            print(f"\n[TenutoJAX] 🛑 Generous Early Stopping Triggered! Validation loss did not improve by >{args.min_delta} for {args.patience} consecutive epochs.")
+            print(f"[TenutoJAX] Peak Validation Loss Achieved: {best_val_loss:.4f}")
+            break
 
 if __name__ == "__main__":
     main()
