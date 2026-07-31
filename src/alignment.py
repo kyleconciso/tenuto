@@ -53,17 +53,24 @@ def compute_alignment_targets(score_path_or_array=None, perf_path_or_array=None)
             s_sorted = score_onsets[sort_idx]
             p_sorted = perf_onsets[sort_idx]
             
-            from scipy.interpolate import UnivariateSpline
-            try:
-                # Smooth macro rubato spline trend
-                spline = UnivariateSpline(s_sorted, p_sorted, s=0.5)
-                macro_onsets = spline(score_onsets)
-            except Exception:
+            # Aggregate unique beat positions for chord notes to guarantee strictly increasing x for spline
+            unique_beats = np.unique(s_sorted)
+            if len(unique_beats) >= 4:
+                unique_perf = np.array([p_sorted[s_sorted == b].mean() for b in unique_beats])
+                from scipy.interpolate import UnivariateSpline
+                try:
+                    spline = UnivariateSpline(unique_beats, unique_perf, s=0.5)
+                    macro_onsets = spline(score_onsets)
+                except Exception:
+                    p = np.polyfit(score_onsets, perf_onsets, 1)
+                    macro_onsets = np.polyval(p, score_onsets)
+            else:
                 p = np.polyfit(score_onsets, perf_onsets, 1)
                 macro_onsets = np.polyval(p, score_onsets)
             
             # Residual micro-timing shift: perf_onset - macro_onset
             delta_t_raw = perf_onsets - macro_onsets
+            delta_t_raw = np.nan_to_num(delta_t_raw, nan=0.0)
         else:
             delta_t_raw = np.zeros(n)
 
