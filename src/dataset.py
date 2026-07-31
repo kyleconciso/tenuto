@@ -129,7 +129,10 @@ def create_dataloaders(data_dir: str, batch_size: int = 16, seq_len: int = 256, 
     val_dataset = TenutoScoreDataset(os.path.join(data_dir, "val"), seq_len=seq_len, in_features=in_features)
 
     nw = num_workers if (os.cpu_count() and os.cpu_count() > 1) else 0
-    train_loader = DataLoader(train_dataset, batch_size=batch_size, shuffle=True, num_workers=nw, pin_memory=True if nw > 0 else False)
-    val_loader = DataLoader(val_dataset, batch_size=batch_size, shuffle=False, num_workers=nw, pin_memory=True if nw > 0 else False)
+    import torch.multiprocessing as mp
+    ctx = mp.get_context("forkserver") if (nw > 0 and "forkserver" in mp.get_all_start_methods()) else None
+
+    train_loader = DataLoader(train_dataset, batch_size=batch_size, shuffle=True, num_workers=nw, pin_memory=True if nw > 0 else False, multiprocessing_context=ctx)
+    val_loader = DataLoader(val_dataset, batch_size=batch_size, shuffle=False, num_workers=nw, pin_memory=True if nw > 0 else False, multiprocessing_context=ctx)
 
     return train_loader, val_loader

@@ -159,10 +159,14 @@ def main(args=None):
         n_val = max(num_val_batches, 1)
         val_loss = val_metrics_accum["total_loss"] / n_val
 
-        elapsed = time.time() - t0
+        train_timing_ms = (train_metrics_accum['loss_timing'] / n_train) * 1000.0
+        train_vel_rmse = np.sqrt(train_metrics_accum['loss_velocity'] / n_train)
+        val_timing_ms = (val_metrics_accum['loss_timing'] / n_val) * 1000.0
+        val_vel_rmse = np.sqrt(val_metrics_accum['loss_velocity'] / n_val)
+
         print(f"Epoch [{epoch:02d}/{args.epochs:02d}] | Time: {elapsed:.2f}s (JAX TPU)")
-        print(f"  ├── Train Loss : {train_loss:.4f} | Timing: {train_metrics_accum['loss_timing']/n_train:.5f}s | Vel: {train_metrics_accum['loss_velocity']/n_train:.2f}")
-        print(f"  └── Val Loss   : {val_loss:.4f} | Timing: {val_metrics_accum['loss_timing']/n_val:.5f}s | Vel: {val_metrics_accum['loss_velocity']/n_val:.2f}")
+        print(f"  ├── Train Loss : {train_loss:.4f} | Timing Huber: {train_timing_ms:.3f}ms | Vel RMSE: {train_vel_rmse:.2f} steps")
+        print(f"  └── Val Loss   : {val_loss:.4f} | Timing Huber: {val_timing_ms:.3f}ms | Vel RMSE: {val_vel_rmse:.2f} steps")
 
         # Save Checkpoint
         os.makedirs("checkpoints", exist_ok=True)
