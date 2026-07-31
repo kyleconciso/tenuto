@@ -150,7 +150,6 @@ def main():
     parser.add_argument("--batch_size", type=int, default=16, help="Batch size for training")
     parser.add_argument("--lr", type=float, default=1e-4, help="Learning rate")
     parser.add_argument("--seed", type=int, default=42, help="Random seed for reproducibility")
-    parser.add_argument("--resume", action="store_true", help="Resume training from the latest checkpoint if it exists")
     args = parser.parse_args()
 
     set_seed(args.seed)
@@ -168,18 +167,18 @@ def main():
     start_epoch = 1
     best_val_loss = float('inf')
 
-    if args.resume:
-        checkpoint_path = f"checkpoints/best_{args.model_type}_model.pth"
-        import os
-        if os.path.exists(checkpoint_path):
-            print(f"[Tenuto] Resuming from checkpoint: {checkpoint_path}")
-            checkpoint = torch.load(checkpoint_path, map_location=device, weights_only=True)
-            model.load_state_dict(checkpoint['state_dict'])
-            optimizer.load_state_dict(checkpoint['optimizer'])
-            start_epoch = checkpoint['epoch'] + 1
-            best_val_loss = checkpoint['best_val_loss']
-        else:
-            print(f"[Tenuto] No checkpoint found at {checkpoint_path}. Starting from scratch.")
+    # Automatically resume from checkpoint if it exists
+    checkpoint_path = f"checkpoints/best_{args.model_type}_model.pth"
+    import os
+    if os.path.exists(checkpoint_path):
+        print(f"[Tenuto] Checkpoint found! Auto-resuming from: {checkpoint_path}")
+        checkpoint = torch.load(checkpoint_path, map_location=device, weights_only=True)
+        model.load_state_dict(checkpoint['state_dict'])
+        optimizer.load_state_dict(checkpoint['optimizer'])
+        start_epoch = checkpoint['epoch'] + 1
+        best_val_loss = checkpoint['best_val_loss']
+    else:
+        print(f"[Tenuto] No checkpoint found at {checkpoint_path}. Starting fresh from Epoch 1.")
 
     train_loader, val_loader = create_dataloaders(args.data_dir, batch_size=args.batch_size)
     inspect_first_dataset_sample(train_loader)
