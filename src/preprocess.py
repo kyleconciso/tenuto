@@ -93,22 +93,29 @@ def preprocess_combined_dataset(data_dir: str = "./data", processed_dir: str = "
                     pq_file = os.path.join(root, f)
                     try:
                         df = pd.read_parquet(pq_file)
-                        if 'tier_a_star' in df.columns:
+                        if 'tier_a_star' in df.columns and (df['tier_a_star'] == True).sum() > 0:
                             df = df[df['tier_a_star'] == True]
+                        elif 'tier_a' in df.columns and (df['tier_a'] == True).sum() > 0:
+                            df = df[df['tier_a'] == True]
                         
                         for idx, row in df.iterrows():
                             if max_samples and len(tasks) >= max_samples:
                                 break
                             xml_bytes = row.get('score_xml_bytes')
+                            if (xml_bytes is None or (hasattr(pd, 'isna') and pd.isna(xml_bytes))) and 'score_midi_bytes' in row:
+                                xml_bytes = row.get('score_midi_bytes')
+                                ext = ".mid"
+                            else:
+                                ext = ".xml"
+                                
                             midi_bytes = row.get('performance_midi_bytes')
-                            if xml_bytes is not None and midi_bytes is not None:
+                            if xml_bytes is not None and (not hasattr(pd, 'isna') or not pd.isna(xml_bytes)) and midi_bytes is not None and (not hasattr(pd, 'isna') or not pd.isna(midi_bytes)):
                                 is_train = (global_idx % 100) < 85
                                 dest_dir = train_out if is_train else val_out
                                 source_tag = f"pianocore_{row.get('id', idx)}"
                                 dest_name = f"pianocore_pair_{global_idx:06d}.pt"
                                 
-                                # Write persistent temp files for multiprocessing workers
-                                tmp_xml = os.path.join(tempfile.gettempdir(), f"pc_xml_{global_idx:06d}.xml")
+                                tmp_xml = os.path.join(tempfile.gettempdir(), f"pc_xml_{global_idx:06d}{ext}")
                                 tmp_mid = os.path.join(tempfile.gettempdir(), f"pc_mid_{global_idx:06d}.mid")
                                 with open(tmp_xml, "wb") as xf:
                                     xf.write(xml_bytes)
