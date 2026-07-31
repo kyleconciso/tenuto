@@ -20,12 +20,11 @@ def download_dataset_from_host(host_url: str, target_dir: str = "./data/processe
 
     # 2. Try rclone sync with WebDAV credentials
     try:
+        pass_obs = os.popen("rclone obscure tenuto").read().strip() or "tenuto"
+        connection_str = f':webdav,url="{host_url}",user="tenuto",pass="{pass_obs}":'
         cmd = [
             "rclone", "copy",
-            f":webdav:", target_dir,
-            "--webdav-url", host_url,
-            "--webdav-user", "tenuto",
-            "--webdav-pass", os.popen("rclone obscure tenuto").read().strip() or "tenuto",
+            connection_str, target_dir,
             "-P"
         ]
         subprocess.run(cmd, check=True)
