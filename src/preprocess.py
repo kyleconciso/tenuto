@@ -41,7 +41,8 @@ def preprocess_combined_dataset(data_dir: str = "./data", processed_dir: str = "
     
     random.seed(42)
 
-    pbar = tqdm(total=131342, desc="Preprocessing Score-Performance Pairs")
+    total_target = max_samples if max_samples else 131342
+    pbar = tqdm(total=total_target, desc="Preprocessing Score-Performance Pairs")
 
     # 1. Process ASAP
     asap_dir = os.path.join(data_dir, "asap")
