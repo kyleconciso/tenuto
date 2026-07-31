@@ -198,7 +198,13 @@ def main():
         scheduler.step()
         
         elapsed = time.time() - t0
-        print(f"Epoch {epoch:02d}/{args.epochs:02d} | Train Loss: {train_loss:.4f} (Timing: {train_timing:.5f}, Vel: {train_vel:.2f}, Art: {train_art:.2f}, Ped: {train_ped:.2f}) | Val Loss: {val_loss:.4f} | Time: {elapsed:.1f}s")
+        remaining_epochs = args.epochs - epoch
+        eta_seconds = elapsed * remaining_epochs
+        eta_str = time.strftime("%Hh %Mm %Ss", time.gmtime(eta_seconds)) if eta_seconds >= 3600 else time.strftime("%Mm %Ss", time.gmtime(eta_seconds))
+        
+        print(f"Epoch [{epoch:02d}/{args.epochs:02d}] | Time: {elapsed:.1f}s (ETA: {eta_str})")
+        print(f"  ├── Train Loss : {train_loss:.4f} | Timing: {train_timing:.5f}s | Vel: {train_vel:.2f} | Art: {train_art:.2f} | Ped: {train_ped:.2f}")
+        print(f"  └── Val Loss   : {val_loss:.4f} | Timing: {val_timing:.5f}s | Vel: {val_vel:.2f} | Art: {val_art:.2f} | Ped: {val_ped:.2f}")
 
         if val_loss < best_val_loss:
             best_val_loss = val_loss

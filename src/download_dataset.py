@@ -20,9 +20,9 @@ def download_asap_dataset(target_dir: str = "./data/asap", force: bool = False):
         print(f"[TenutoData] Git clone failed: {e}.")
     return target_dir
 
-def download_pianocore_dataset(target_dir: str = "./data/pianocore", subset: str = "PianoCoRe-A"):
+def download_pianocore_dataset(target_dir: str = "./data/pianocore", subset: str = "PianoCoRe-A*"):
     """
-    Downloads specific subset of PianoCoRe (default: 'PianoCoRe-A' for aligned score-performance pairs).
+    Downloads specific subset of PianoCoRe (default: 'PianoCoRe-A*' for aligned high-quality score-performance pairs).
     """
     os.makedirs(target_dir, exist_ok=True)
     print(f"[TenutoData] Fetching PianoCoRe subset '{subset}' from Hugging Face '{PIANOCORE_HF_DATASET}'...")

@@ -8,14 +8,6 @@ Instead of predicting events note-by-note, Tenuto runs a single forward pass ove
 
 ---
 
-## Open in Colab
-
-[![Open In Colab](https://colab.research.google.com/assets/colab-badge.svg)](https://colab.research.google.com/github/kyleconciso/tenuto/blob/main/notebooks/colab_training.ipynb)
-
-A complete training and inference pipeline is available in the provided Google Colab Notebook. The notebook handles dataset downloading, preprocessing, training, and audio generation.
-
----
-
 ## Local Quick Start
 
 If you want to run it locally, follow these steps:

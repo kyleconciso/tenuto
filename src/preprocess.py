@@ -45,7 +45,39 @@ def preprocess_combined_dataset(data_dir: str = "./data", processed_dir: str = "
 
     # 1. Process ASAP
     asap_dir = os.path.join(data_dir, "asap")
-    if os.path.exists(asap_dir):
+    metadata_csv = os.path.join(asap_dir, "metadata.csv")
+    if os.path.exists(metadata_csv):
+        try:
+            import pandas as pd
+            df_asap = pd.read_csv(metadata_csv)
+            for idx, row in df_asap.iterrows():
+                if max_samples and processed_count + skipped_count >= max_samples:
+                    break
+                xml_rel = row.get('xml_score')
+                midi_perf_rel = row.get('midi_performance')
+                if pd.notna(xml_rel) and pd.notna(midi_perf_rel):
+                    xml_path = os.path.join(asap_dir, xml_rel)
+                    perf_path = os.path.join(asap_dir, midi_perf_rel)
+                    if os.path.exists(xml_path) and os.path.exists(perf_path):
+                        # Deterministic train/val split based on sample index
+                        is_train = (global_idx % 100) < 85
+                        dest_dir = train_out if is_train else val_out
+                        dest_name = f"asap_pair_{global_idx:06d}.pt"
+                        if os.path.exists(os.path.join(train_out, dest_name)) or os.path.exists(os.path.join(val_out, dest_name)):
+                            if not force:
+                                skipped_count += 1
+                                global_idx += 1
+                                pbar.update(1)
+                                continue
+                        if process_single_pair(xml_path, perf_path, "asap", dest_dir, dest_name, force):
+                            processed_count += 1
+                        else:
+                            skipped_count += 1
+                        global_idx += 1
+                        pbar.update(1)
+        except Exception as e:
+            print(f"\n[TenutoPreprocess] ASAP metadata parsing note: {e}")
+    elif os.path.exists(asap_dir):
         for root, _, files in os.walk(asap_dir):
             score_file = None
             perf_files = []
@@ -57,7 +89,7 @@ def preprocess_combined_dataset(data_dir: str = "./data", processed_dir: str = "
                     perf_files.append(os.path.join(root, f))
             
             if score_file:
-                for pf in (perf_files if perf_files else [None]):
+                for pf in perf_files:
                     if max_samples and processed_count + skipped_count >= max_samples:
                         break
                     
@@ -101,10 +133,17 @@ def preprocess_combined_dataset(data_dir: str = "./data", processed_dir: str = "
                             midi_bytes = row.get('performance_midi_bytes')
                             
                             if xml_bytes is not None and midi_bytes is not None:
-                                is_train = random.random() < 0.85
+                                is_train = (global_idx % 100) < 85
                                 dest_dir = train_out if is_train else val_out
                                 source_tag = f"pianocore_{row.get('id', idx)}"
                                 dest_name = f"pianocore_pair_{global_idx:06d}.pt"
+                                
+                                if os.path.exists(os.path.join(train_out, dest_name)) or os.path.exists(os.path.join(val_out, dest_name)):
+                                    if not force:
+                                        skipped_count += 1
+                                        global_idx += 1
+                                        pbar.update(1)
+                                        continue
                                 
                                 with tempfile.NamedTemporaryFile(delete=False, suffix=".xml") as xml_file:
                                     xml_file.write(xml_bytes)
