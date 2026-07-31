@@ -175,18 +175,34 @@ def main():
     start_epoch = 1
     best_val_loss = float('inf')
 
-    # Automatically resume from checkpoint if it exists
-    checkpoint_path = f"checkpoints/best_{args.model_type}_model.pth"
+    # Automatically resume from latest or best checkpoint
     import os
-    if os.path.exists(checkpoint_path):
+    latest_ckpt_path = f"checkpoints/latest_{args.model_type}_model.pth"
+    best_ckpt_path = f"checkpoints/best_{args.model_type}_model.pth"
+    checkpoint_path = latest_ckpt_path if os.path.exists(latest_ckpt_path) else (best_ckpt_path if os.path.exists(best_ckpt_path) else None)
+
+    # If no local checkpoint found, attempt to sync latest checkpoint from self-hosted storage
+    host_url = args.host_url or os.environ.get("HOST_STORAGE_URL")
+    if checkpoint_path is None and host_url:
+        try:
+            print(f"[Tenuto] Checking remote storage server for existing checkpoints...")
+            import subprocess
+            subprocess.run(["curl", "-s", "-f", "-u", "tenuto:tenuto", "-o", latest_ckpt_path, f"{host_url}/latest_{args.model_type}_model.pth"], check=True)
+            if os.path.exists(latest_ckpt_path):
+                checkpoint_path = latest_ckpt_path
+                print(f"[Tenuto] Downloaded latest checkpoint from storage host!")
+        except Exception:
+            pass
+
+    if checkpoint_path and os.path.exists(checkpoint_path):
         print(f"[Tenuto] Checkpoint found! Auto-resuming from: {checkpoint_path}")
-        checkpoint = torch.load(checkpoint_path, map_location=device, weights_only=True)
+        checkpoint = torch.load(checkpoint_path, map_location=device, weights_only=False)
         model.load_state_dict(checkpoint['state_dict'])
         optimizer.load_state_dict(checkpoint['optimizer'])
-        start_epoch = checkpoint['epoch'] + 1
-        best_val_loss = checkpoint['best_val_loss']
+        start_epoch = checkpoint.get('epoch', 0) + 1
+        best_val_loss = checkpoint.get('best_val_loss', float('inf'))
     else:
-        print(f"[Tenuto] No checkpoint found at {checkpoint_path}. Starting fresh from Epoch 1.")
+        print(f"[Tenuto] No checkpoint found. Starting fresh from Epoch 1.")
 
     train_loader, val_loader = create_dataloaders(args.data_dir, batch_size=args.batch_size)
     inspect_first_dataset_sample(train_loader)
