@@ -157,6 +157,7 @@ def main():
     parser.add_argument("--batch_size", type=int, default=16, help="Batch size for training")
     parser.add_argument("--lr", type=float, default=1e-4, help="Learning rate")
     parser.add_argument("--seed", type=int, default=42, help="Random seed for reproducibility")
+    parser.add_argument("--host_url", type=str, default=None, help="Optional self-hosted storage WebDAV URL to backup checkpoints")
     args = parser.parse_args()
 
     set_seed(args.seed)
@@ -201,12 +202,22 @@ def main():
 
         if val_loss < best_val_loss:
             best_val_loss = val_loss
+            ckpt_path = f"best_{args.model_type}_model.pth"
             save_checkpoint({
                 'epoch': epoch,
                 'state_dict': model.state_dict(),
                 'optimizer': optimizer.state_dict(),
                 'best_val_loss': best_val_loss,
-            }, filename=f"best_{args.model_type}_model.pth")
+            }, filename=ckpt_path)
+            
+            # If host_url is provided, sync checkpoint to local host server
+            host_url = args.host_url or os.environ.get("HOST_STORAGE_URL")
+            if host_url:
+                try:
+                    from src.sync import upload_checkpoint_to_host
+                    upload_checkpoint_to_host(host_url, f"checkpoints/{ckpt_path}")
+                except Exception as e:
+                    print(f"[Tenuto] Host sync notice: {e}")
 
 if __name__ == "__main__":
     main()
