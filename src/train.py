@@ -181,7 +181,18 @@ def main():
     best_ckpt_path = f"checkpoints/best_{args.model_type}_model.pth"
     checkpoint_path = latest_ckpt_path if os.path.exists(latest_ckpt_path) else (best_ckpt_path if os.path.exists(best_ckpt_path) else None)
 
-    # If no local checkpoint found, attempt to sync latest checkpoint from self-hosted storage
+    # If no local checkpoint found, check Hugging Face Model Hub
+    if checkpoint_path is None:
+        try:
+            from src.sync import download_checkpoint_from_hf
+            hf_ckpt = download_checkpoint_from_hf(filename=f"latest_{args.model_type}_model.pth", target_dir="checkpoints")
+            if hf_ckpt and os.path.exists(hf_ckpt):
+                checkpoint_path = hf_ckpt
+                print(f"[Tenuto] Downloaded latest checkpoint from Hugging Face Hub!")
+        except Exception:
+            pass
+
+    # If still no checkpoint, attempt self-hosted storage fallback
     host_url = args.host_url or os.environ.get("HOST_STORAGE_URL")
     if checkpoint_path is None and host_url:
         try:
@@ -242,7 +253,16 @@ def main():
                 'best_val_loss': best_val_loss,
             }, filename=best_ckpt)
 
-        # 3. Upload checkpoints to self-hosted storage server
+        # 3. Sync checkpoints to Hugging Face Model Hub (Policy-Safe)
+        try:
+            from src.sync import upload_checkpoint_to_hf
+            upload_checkpoint_to_hf(f"checkpoints/{latest_ckpt}")
+            if val_loss == best_val_loss:
+                upload_checkpoint_to_hf(f"checkpoints/best_{args.model_type}_model.pth")
+        except Exception:
+            pass
+
+        # 4. Optional WebDAV Host Storage fallback
         host_url = args.host_url or os.environ.get("HOST_STORAGE_URL")
         if host_url:
             try:
