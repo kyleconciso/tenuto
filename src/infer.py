@@ -63,11 +63,16 @@ def infer_performance(score_path: str, checkpoint_path: str = None, model_type: 
 
     # 1. Extract 40D Features
     features = None
+    pt_targets = None
     if os.path.exists(target_score):
         if target_score.endswith('.pt'):
             try:
                 pt_data = torch.load(target_score, map_location="cpu")
-                features = pt_data.get("x") if isinstance(pt_data, dict) else pt_data
+                if isinstance(pt_data, dict):
+                    features = pt_data.get("x")
+                    pt_targets = pt_data.get("targets")
+                else:
+                    features = pt_data
                 if features is not None and features.ndim == 1:
                     features = features.unsqueeze(0)
                 print(f"[Tenuto Inference] Loaded preprocessed feature matrix {list(features.shape)} from '{target_score}'.")
@@ -87,7 +92,11 @@ def infer_performance(score_path: str, checkpoint_path: str = None, model_type: 
                             pt_path = os.path.join(root, f)
                             try:
                                 pt_data = torch.load(pt_path, map_location="cpu")
-                                pt_x = pt_data.get("x") if isinstance(pt_data, dict) else pt_data
+                                if isinstance(pt_data, dict):
+                                    pt_x = pt_data.get("x")
+                                    pt_targets = pt_data.get("targets")
+                                else:
+                                    pt_x = pt_data
                                 if pt_x is not None and pt_x.numel() > 0:
                                     features = pt_x if pt_x.ndim > 1 else pt_x.unsqueeze(0)
                                     target_score = pt_path
@@ -230,16 +239,21 @@ def infer_performance(score_path: str, checkpoint_path: str = None, model_type: 
     }
     render_expressive_midi(score_notes, original_predictions, output_midi_path="output_original.mid")
 
-    # C. Locate or Copy Human Reference Performance MIDI (if available)
+    # C. Locate or Render Human Reference Performance MIDI (if available)
     try:
-        import shutil
         human_midi_dst = "output_human.mid"
-        if target_score and target_score.endswith(('.mid', '.midi')) and os.path.exists(target_score):
+        if pt_targets:
+            pt_targets_clipped = {k: v[:num_notes] for k, v in pt_targets.items()}
+            render_expressive_midi(score_notes, pt_targets_clipped, output_midi_path=human_midi_dst)
+            print(f"[Tenuto Inference] Rendered Ground-Truth Human Reference from dataset -> '{human_midi_dst}'")
+        elif target_score and target_score.endswith(('.mid', '.midi')) and os.path.exists(target_score):
+            import shutil
             shutil.copyfile(target_score, human_midi_dst)
             print(f"[Tenuto Inference] Found Human Reference MIDI: '{target_score}' -> '{human_midi_dst}'")
         else:
             score_dir = os.path.dirname(target_score) if target_score else ""
             if score_dir and os.path.exists(score_dir):
+                import shutil
                 for f in os.listdir(score_dir):
                     if f.endswith(('.mid', '.midi')) and not f.startswith('midi_score') and not f.startswith('output_'):
                         src_path = os.path.join(score_dir, f)
