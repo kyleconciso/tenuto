@@ -83,17 +83,44 @@ def render_midi_to_wav(midi_path: str, wav_path: str = None):
 
 def play_audio_in_colab(wav_or_midi_path: str, title: str = "Audio Player"):
     """
-    Embeds an interactive HTML5 / IPython Audio player directly in Colab.
+    Embeds an interactive HTML5 Audio player and direct download buttons for MIDI & WAV in Google Colab.
     """
     try:
+        import base64
         from IPython.display import display, Audio, HTML
         print(f"--- Playing: {title} ---")
         
         wav_path = render_midi_to_wav(wav_or_midi_path)
         if wav_path and os.path.exists(wav_path):
             display(Audio(wav_path, rate=22050))
-            display(HTML(f"<b>🎵 Play Audio ({title}):</b> <code>{os.path.basename(wav_path)}</code>"))
-        else:
-            print(f"[TenutoAudio] Could not generate WAV for: '{wav_or_midi_path}'")
+
+        # Create Download Buttons
+        html_buttons = []
+        midi_name = os.path.basename(wav_or_midi_path)
+        if os.path.exists(wav_or_midi_path):
+            with open(wav_or_midi_path, "rb") as f:
+                midi_b64 = base64.b64encode(f.read()).decode("utf-8")
+            html_buttons.append(
+                f'<a href="data:audio/midi;base64,{midi_b64}" download="{midi_name}" '
+                f'style="display:inline-block; padding:8px 16px; background-color:#10B981; color:white; '
+                f'font-weight:600; font-family:sans-serif; text-decoration:none; border-radius:6px; margin-right:10px;">'
+                f'⬇️ Download MIDI ({midi_name})</a>'
+            )
+
+        if wav_path and os.path.exists(wav_path):
+            wav_name = os.path.basename(wav_path)
+            with open(wav_path, "rb") as f:
+                wav_b64 = base64.b64encode(f.read()).decode("utf-8")
+            html_buttons.append(
+                f'<a href="data:audio/wav;base64,{wav_b64}" download="{wav_name}" '
+                f'style="display:inline-block; padding:8px 16px; background-color:#3B82F6; color:white; '
+                f'font-weight:600; font-family:sans-serif; text-decoration:none; border-radius:6px;">'
+                f'⬇️ Download WAV ({wav_name})</a>'
+            )
+
+        if html_buttons:
+            buttons_div = f'<div style="margin-top:10px; margin-bottom:20px;">{"".join(html_buttons)}</div>'
+            display(HTML(buttons_div))
+
     except Exception as e:
         print(f"[TenutoAudio] Audio player error: {e}")
