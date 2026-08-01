@@ -42,7 +42,7 @@ def infer_performance(score_path: str, checkpoint_path: str = None, model_type: 
     """
     device = get_device()
     
-    # Locate score file
+    # Locate score file or preprocessed data file
     target_score = score_path
     if not os.path.exists(target_score):
         found = False
@@ -51,9 +51,9 @@ def infer_performance(score_path: str, checkpoint_path: str = None, model_type: 
             if os.path.exists(sroot):
                 for root, _, files in os.walk(sroot):
                     for f in files:
-                        if f.lower().endswith(('.xml', '.mxl', '.musicxml', '.mid', '.midi')):
+                        if f.lower().endswith(('.xml', '.mxl', '.musicxml', '.mid', '.midi', '.pt')):
                             target_score = os.path.join(root, f)
-                            print(f"[Tenuto Inference] Score '{score_path}' not found. Using dataset score '{target_score}'.")
+                            print(f"[Tenuto Inference] Score '{score_path}' not found. Using dataset file '{target_score}'.")
                             found = True
                             break
                     if found:
@@ -64,8 +64,41 @@ def infer_performance(score_path: str, checkpoint_path: str = None, model_type: 
     # 1. Extract 40D Features
     features = None
     if os.path.exists(target_score):
-        print(f"[Tenuto Inference] Extracting note features from '{target_score}'...")
-        features = extract_40d_features_from_score(target_score)
+        if target_score.endswith('.pt'):
+            try:
+                pt_data = torch.load(target_score, map_location="cpu")
+                features = pt_data.get("x") if isinstance(pt_data, dict) else pt_data
+                if features is not None and features.ndim == 1:
+                    features = features.unsqueeze(0)
+                print(f"[Tenuto Inference] Loaded preprocessed feature matrix {list(features.shape)} from '{target_score}'.")
+            except Exception as e:
+                print(f"[Tenuto Inference] Notice: could not load preprocessed tensor from '{target_score}': {e}")
+        else:
+            print(f"[Tenuto Inference] Extracting note features from '{target_score}'...")
+            features = extract_40d_features_from_score(target_score)
+
+    if features is None or features.numel() == 0:
+        # Secondary fallback: look for any .pt preprocessed file
+        for sroot in ["./data", "data", "/content/tenuto/data"]:
+            if os.path.exists(sroot):
+                for root, _, files in os.walk(sroot):
+                    for f in files:
+                        if f.endswith('.pt'):
+                            pt_path = os.path.join(root, f)
+                            try:
+                                pt_data = torch.load(pt_path, map_location="cpu")
+                                pt_x = pt_data.get("x") if isinstance(pt_data, dict) else pt_data
+                                if pt_x is not None and pt_x.numel() > 0:
+                                    features = pt_x if pt_x.ndim > 1 else pt_x.unsqueeze(0)
+                                    target_score = pt_path
+                                    print(f"[Tenuto Inference] Using preprocessed dataset tensor from '{pt_path}'.")
+                                    break
+                            except Exception:
+                                pass
+                    if features is not None:
+                        break
+            if features is not None:
+                break
 
     if features is None or features.numel() == 0:
         print(f"[Tenuto Inference] Score '{target_score}' missing or invalid. Falling back to synthetic score note features (64 notes)...")
