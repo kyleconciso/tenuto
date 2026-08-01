@@ -174,7 +174,7 @@ def infer_performance(score_path: str, checkpoint_path: str = None, model_type: 
 
     # 3. Render Expressive MIDI File
     score_notes = None
-    if os.path.exists(target_score):
+    if os.path.exists(target_score) and not target_score.endswith('.pt'):
         try:
             import partitura as pt
             score = pt.load_score(target_score)
@@ -198,7 +198,39 @@ def infer_performance(score_path: str, checkpoint_path: str = None, model_type: 
         print("[Tenuto Inference] Generating target note sequence from features.")
         score_notes = [{"pitch": int(features[i, 0].item() * 127.0) if features[i, 0].item() > 0 else (60 + (i % 24)), "onset_sec": i * 0.25, "duration_sec": 0.25} for i in range(features.size(0))]
 
+    # A. Render Tenuto AI Expressive Performance MIDI
     render_expressive_midi(score_notes, predictions, output_midi_path=output_midi)
+
+    # B. Render Mechanical Original Score MIDI (Un-expressed baseline)
+    num_notes = len(score_notes)
+    original_predictions = {
+        "delta_t": torch.zeros(num_notes),
+        "velocity": torch.full((num_notes,), 64.0),
+        "articulation": torch.ones(num_notes),
+        "pedal": torch.zeros(num_notes),
+        "tempo_scale": torch.ones(num_notes)
+    }
+    render_expressive_midi(score_notes, original_predictions, output_midi_path="output_original.mid")
+
+    # C. Locate or Copy Human Reference Performance MIDI (if available)
+    try:
+        import shutil
+        human_midi_dst = "output_human.mid"
+        if target_score and target_score.endswith(('.mid', '.midi')) and os.path.exists(target_score):
+            shutil.copyfile(target_score, human_midi_dst)
+            print(f"[Tenuto Inference] Found Human Reference MIDI: '{target_score}' -> '{human_midi_dst}'")
+        else:
+            score_dir = os.path.dirname(target_score) if target_score else ""
+            if score_dir and os.path.exists(score_dir):
+                for f in os.listdir(score_dir):
+                    if f.endswith(('.mid', '.midi')) and not f.startswith('midi_score') and not f.startswith('output_'):
+                        src_path = os.path.join(score_dir, f)
+                        shutil.copyfile(src_path, human_midi_dst)
+                        print(f"[Tenuto Inference] Found Human Reference MIDI: '{src_path}' -> '{human_midi_dst}'")
+                        break
+    except Exception as e:
+        print(f"[Tenuto Inference] Human reference MIDI notice: {e}")
+
     return predictions
 
 def main(args=None):
