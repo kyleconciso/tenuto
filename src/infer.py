@@ -195,14 +195,32 @@ def infer_performance(score_path: str, checkpoint_path: str = None, model_type: 
             print(f"[Tenuto Inference] Partitura note loading note: {e}.")
 
     if score_notes is None:
-        print("[Tenuto Inference] Generating target note sequence from features.")
-        score_notes = [{"pitch": int(features[i, 0].item() * 127.0) if features[i, 0].item() > 0 else (60 + (i % 24)), "onset_sec": i * 0.25, "duration_sec": 0.25} for i in range(features.size(0))]
+        print("[Tenuto Inference] Reconstructing note sequence from feature matrix (max 256 notes)...")
+        num_notes = min(features.size(0), 256)
+        score_notes = []
+        curr_onset = 0.0
+        for i in range(num_notes):
+            raw_pitch = float(features[i, 0].item()) * 127.0 if features.size(1) > 0 else 60.0
+            pitch = int(np.clip(round(raw_pitch), 21, 108)) if raw_pitch > 10 else int(60 + (i % 12))
+            
+            raw_dur = float(features[i, 15].item()) * 4.0 if features.size(1) > 15 else 0.5
+            dur_sec = max(0.15, raw_dur * 0.5) if raw_dur > 0 else 0.25
+            
+            score_notes.append({
+                "pitch": pitch,
+                "onset_sec": curr_onset,
+                "duration_sec": dur_sec
+            })
+            curr_onset += 0.35
+
+    # Clip predictions to match score_notes length (prevents endless audio rendering)
+    num_notes = len(score_notes)
+    predictions_clipped = {k: v[:num_notes] for k, v in predictions.items()}
 
     # A. Render Tenuto AI Expressive Performance MIDI
-    render_expressive_midi(score_notes, predictions, output_midi_path=output_midi)
+    render_expressive_midi(score_notes, predictions_clipped, output_midi_path=output_midi)
 
     # B. Render Mechanical Original Score MIDI (Un-expressed baseline)
-    num_notes = len(score_notes)
     original_predictions = {
         "delta_t": torch.zeros(num_notes),
         "velocity": torch.full((num_notes,), 64.0),
