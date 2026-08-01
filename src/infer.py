@@ -8,14 +8,14 @@ from src.model import build_model
 from src.features import extract_40d_features_from_score
 from src.render import render_expressive_midi
 
-def find_best_checkpoint(checkpoint_path: str = None):
+def find_best_checkpoint(checkpoint_path: str = None, preferred_ext: str = None):
     """Auto-detects the best available model checkpoint (JAX .msgpack or PyTorch .pth)."""
     gdrive_dir = "/content/drive/MyDrive/Tenuto/checkpoints"
     candidates = []
     if checkpoint_path:
         candidates.append(checkpoint_path)
     
-    candidates.extend([
+    all_defaults = [
         os.path.join(gdrive_dir, "best_transformer_jax.msgpack"),
         os.path.join(gdrive_dir, "best_transformer_model.pth"),
         os.path.join(gdrive_dir, "latest_transformer_jax.msgpack"),
@@ -24,7 +24,11 @@ def find_best_checkpoint(checkpoint_path: str = None):
         "checkpoints/best_transformer_model.pth",
         "checkpoints/latest_transformer_jax.msgpack",
         "checkpoints/latest_transformer_model.pth"
-    ])
+    ]
+    
+    if preferred_ext:
+        candidates.extend([p for p in all_defaults if p.endswith(preferred_ext)])
+    candidates.extend(all_defaults)
 
     for path in candidates:
         if path and os.path.exists(path):
@@ -42,19 +46,36 @@ def infer_performance(score_path: str, checkpoint_path: str = None, model_type: 
     target_score = score_path
     if not os.path.exists(target_score):
         found = False
-        for root, _, files in os.walk("./data"):
-            for f in files:
-                if f.lower().endswith(('.xml', '.mxl', '.musicxml', '.mid', '.midi')):
-                    target_score = os.path.join(root, f)
-                    print(f"[Tenuto Inference] Score '{score_path}' not found. Using dataset score '{target_score}'.")
-                    found = True
-                    break
+        search_roots = ["./data", "data", "/content/tenuto/data"]
+        for sroot in search_roots:
+            if os.path.exists(sroot):
+                for root, _, files in os.walk(sroot):
+                    for f in files:
+                        if f.lower().endswith(('.xml', '.mxl', '.musicxml', '.mid', '.midi')):
+                            target_score = os.path.join(root, f)
+                            print(f"[Tenuto Inference] Score '{score_path}' not found. Using dataset score '{target_score}'.")
+                            found = True
+                            break
+                    if found:
+                        break
             if found:
                 break
 
     # 1. Extract 40D Features
-    print(f"[Tenuto Inference] Extracting note features from '{target_score}'...")
-    features = extract_40d_features_from_score(target_score)
+    features = None
+    if os.path.exists(target_score):
+        print(f"[Tenuto Inference] Extracting note features from '{target_score}'...")
+        features = extract_40d_features_from_score(target_score)
+
+    if features is None or features.numel() == 0:
+        print(f"[Tenuto Inference] Score '{target_score}' missing or invalid. Falling back to synthetic score note features (64 notes)...")
+        num_notes = 64
+        features = torch.zeros((num_notes, in_features), dtype=torch.float32)
+        features[:, 0] = torch.tensor([(60 + (i % 24)) / 127.0 for i in range(num_notes)])
+        features[:, 15] = 0.25 # duration
+        features[:, 21] = 0.5  # tempo
+        features[:, 26] = 1.0  # dynamic marking (mf)
+        features[:, 38] = 1.0  # staff 1
     
     # 2. Locate Checkpoint
     active_checkpoint = find_best_checkpoint(checkpoint_path)
@@ -102,8 +123,11 @@ def infer_performance(score_path: str, checkpoint_path: str = None, model_type: 
         print(f"[Tenuto Inference] Building PyTorch model & loading weights...")
         x = features.unsqueeze(0).to(device)
         model = build_model(model_name=model_type, in_features=in_features).to(device)
-        if active_checkpoint and os.path.exists(active_checkpoint) and active_checkpoint.endswith((".pth", ".pt")):
-            load_checkpoint(active_checkpoint, model)
+        
+        pth_ckpt = active_checkpoint if (active_checkpoint and active_checkpoint.endswith((".pth", ".pt"))) else find_best_checkpoint(preferred_ext=".pth")
+        if pth_ckpt and os.path.exists(pth_ckpt) and pth_ckpt.endswith((".pth", ".pt")):
+            load_checkpoint(pth_ckpt, model)
+            
         model.eval()
         with torch.no_grad():
             preds_raw = model(x)
@@ -116,25 +140,30 @@ def infer_performance(score_path: str, checkpoint_path: str = None, model_type: 
         print(f"  • Tempo Scale range:                  [{predictions['tempo_scale'].min().item():.2f}x, {predictions['tempo_scale'].max().item():.2f}x]")
 
     # 3. Render Expressive MIDI File
-    try:
-        import partitura as pt
-        score = pt.load_score(target_score)
-        score_notes_raw = score.note_array()
-        
-        score_notes = []
-        for i in range(len(score_notes_raw)):
-            note = score_notes_raw[i]
-            onset = note['onset_sec'] if 'onset_sec' in score_notes_raw.dtype.names else (note['onset_beat'] * 0.5 if 'onset_beat' in score_notes_raw.dtype.names else i * 0.25)
-            dur = note['duration_sec'] if 'duration_sec' in score_notes_raw.dtype.names else (note['duration_beat'] * 0.5 if 'duration_beat' in score_notes_raw.dtype.names else 0.25)
-            pitch = note['pitch'] if 'pitch' in score_notes_raw.dtype.names else 60
-            score_notes.append({
-                "pitch": pitch,
-                "onset_sec": onset,
-                "duration_sec": dur
-            })
-    except Exception as e:
-        print(f"[Tenuto Inference] Score note loading info: {e}. Generating target note sequence.")
-        score_notes = [{"pitch": 60 + (i % 24), "onset_sec": i * 0.25, "duration_sec": 0.25} for i in range(features.size(0))]
+    score_notes = None
+    if os.path.exists(target_score):
+        try:
+            import partitura as pt
+            score = pt.load_score(target_score)
+            score_notes_raw = score.note_array()
+            
+            score_notes = []
+            for i in range(len(score_notes_raw)):
+                note = score_notes_raw[i]
+                onset = note['onset_sec'] if 'onset_sec' in score_notes_raw.dtype.names else (note['onset_beat'] * 0.5 if 'onset_beat' in score_notes_raw.dtype.names else i * 0.25)
+                dur = note['duration_sec'] if 'duration_sec' in score_notes_raw.dtype.names else (note['duration_beat'] * 0.5 if 'duration_beat' in score_notes_raw.dtype.names else 0.25)
+                pitch = note['pitch'] if 'pitch' in score_notes_raw.dtype.names else 60
+                score_notes.append({
+                    "pitch": pitch,
+                    "onset_sec": onset,
+                    "duration_sec": dur
+                })
+        except Exception as e:
+            print(f"[Tenuto Inference] Partitura note loading note: {e}.")
+
+    if score_notes is None:
+        print("[Tenuto Inference] Generating target note sequence from features.")
+        score_notes = [{"pitch": int(features[i, 0].item() * 127.0) if features[i, 0].item() > 0 else (60 + (i % 24)), "onset_sec": i * 0.25, "duration_sec": 0.25} for i in range(features.size(0))]
 
     render_expressive_midi(score_notes, predictions, output_midi_path=output_midi)
     return predictions
