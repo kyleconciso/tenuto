@@ -79,6 +79,9 @@ def infer_performance(score_path: str, checkpoint_path: str = None, model_type: 
                 if found:
                     break
 
+        if not os.path.exists(target_score):
+            raise FileNotFoundError(f"[Tenuto Inference] Error: Score file '{score_path}' not found, and no dataset files exist in ./data. Please provide a valid score path.")
+
     # 1. Extract 40D Features
     features = None
     pt_targets = None
@@ -128,14 +131,7 @@ def infer_performance(score_path: str, checkpoint_path: str = None, model_type: 
                 break
 
     if features is None or features.numel() == 0:
-        print(f"[Tenuto Inference] Score '{target_score}' missing or invalid. Falling back to synthetic score note features (64 notes)...")
-        num_notes = 64
-        features = torch.zeros((num_notes, in_features), dtype=torch.float32)
-        features[:, 0] = torch.tensor([(60 + (i % 24)) / 127.0 for i in range(num_notes)])
-        features[:, 15] = 0.25 # duration
-        features[:, 21] = 0.5  # tempo
-        features[:, 26] = 1.0  # dynamic marking (mf)
-        features[:, 38] = 1.0  # staff 1
+        raise ValueError(f"[Tenuto Inference] Error: Could not extract features from '{target_score}'. File is missing, corrupt, or invalid score format.")
     
     # 2. Locate Checkpoint
     active_checkpoint = find_best_checkpoint(checkpoint_path)

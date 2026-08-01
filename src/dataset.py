@@ -24,10 +24,9 @@ class TenutoScoreDataset(Dataset):
                     if f.endswith('.pt') or f.endswith('.npz'):
                         raw_files.append(os.path.join(root, f))
         
-        # If no .pt files found, fallback to synthetic dataset for pipeline verification
+        # If no .pt files found, raise error
         if len(raw_files) == 0:
-            print(f"[TenutoDataset] No pre-processed datasets found in '{data_dir}'. Generating synthetic note sequences for pipeline verification...")
-            self.synthetic_num_samples = 100
+            raise FileNotFoundError(f"[TenutoDataset] Error: No preprocessed dataset files (.pt) found in '{data_dir}'. Please run dataset preprocessing first.")
         else:
             # Chunk the raw files into seq_len-note sequences with 50% overlap (hop = seq_len // 2)
             hop_size = seq_len // 2
