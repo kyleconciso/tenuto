@@ -35,6 +35,39 @@ def find_best_checkpoint(checkpoint_path: str = None, preferred_ext: str = None)
             return path
     return None
 
+def extract_piece_metadata(target_score: str, pt_data: dict = None):
+    """Extracts human-readable composer, piece title, and metadata from file path or dataset dict."""
+    composer = "Unknown Composer"
+    piece = "Unknown Piece"
+    source = os.path.basename(target_score)
+
+    ref_path = target_score
+    if pt_data and isinstance(pt_data, dict):
+        ref_path = pt_data.get("score_path") or pt_data.get("perf_path") or target_score
+        source = pt_data.get("source") or os.path.basename(target_score)
+
+    parts = ref_path.replace("\\", "/").split("/")
+    if "asap" in parts:
+        try:
+            idx = parts.index("asap")
+            if idx + 2 < len(parts):
+                composer = parts[idx + 1]
+                piece_parts = parts[idx + 2:-1]
+                piece = " - ".join(piece_parts) if piece_parts else parts[idx + 2]
+        except Exception:
+            pass
+    elif "pianocore" in parts or "pianocore" in str(source).lower():
+        composer = "PianoCoRe Dataset Pair"
+        piece = os.path.splitext(os.path.basename(ref_path))[0]
+    else:
+        piece = os.path.splitext(os.path.basename(target_score))[0]
+
+    return {
+        "composer": composer.replace("_", " "),
+        "piece": piece.replace("_", " "),
+        "source": source
+    }
+
 def infer_performance(score_path: str, checkpoint_path: str = None, model_type: str = "transformer", in_features: int = 40, output_midi: str = "output_expressive.mid"):
     """
     Universal Inference Script:
@@ -85,10 +118,12 @@ def infer_performance(score_path: str, checkpoint_path: str = None, model_type: 
     # 1. Extract 40D Features
     features = None
     pt_targets = None
+    raw_pt_data = None
     if os.path.exists(target_score):
         if target_score.endswith('.pt'):
             try:
                 pt_data = torch.load(target_score, map_location="cpu")
+                raw_pt_data = pt_data
                 if isinstance(pt_data, dict):
                     features = pt_data.get("x")
                     pt_targets = pt_data.get("targets")
@@ -113,6 +148,7 @@ def infer_performance(score_path: str, checkpoint_path: str = None, model_type: 
                             pt_path = os.path.join(root, f)
                             try:
                                 pt_data = torch.load(pt_path, map_location="cpu")
+                                raw_pt_data = pt_data
                                 if isinstance(pt_data, dict):
                                     pt_x = pt_data.get("x")
                                     pt_targets = pt_data.get("targets")
@@ -132,6 +168,16 @@ def infer_performance(score_path: str, checkpoint_path: str = None, model_type: 
 
     if features is None or features.numel() == 0:
         raise ValueError(f"[Tenuto Inference] Error: Could not extract features from '{target_score}'. File is missing, corrupt, or invalid score format.")
+
+    # Extract & Print Piece Metadata
+    meta = extract_piece_metadata(target_score, raw_pt_data)
+    print("=" * 70)
+    print(f"🎼 TENUTO INFERENCE PIECE METADATA")
+    print(f"  • Composer      : {meta['composer']}")
+    print(f"  • Piece / Title : {meta['piece']}")
+    print(f"  • Source File   : {target_score}")
+    print(f"  • Total Notes   : {features.size(0):,} notes")
+    print("=" * 70)
     
     # 2. Locate Checkpoint
     active_checkpoint = find_best_checkpoint(checkpoint_path)
@@ -285,6 +331,7 @@ def infer_performance(score_path: str, checkpoint_path: str = None, model_type: 
     except Exception as e:
         print(f"[Tenuto Inference] Human reference MIDI notice: {e}")
 
+    predictions["_metadata"] = meta
     return predictions
 
 def main(args=None):

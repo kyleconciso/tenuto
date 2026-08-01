@@ -81,15 +81,23 @@ def render_midi_to_wav(midi_path: str, wav_path: str = None):
 
     return None
 
-def play_audio_in_colab(wav_or_midi_path: str, title: str = "Audio Player"):
+def play_audio_in_colab(wav_or_midi_path: str, title: str = "Audio Player", composer: str = None, piece: str = None):
     """
-    Embeds an interactive HTML5 Audio player and direct download buttons for MIDI & WAV in Google Colab.
+    Embeds an interactive HTML5 Audio player, metadata banner, and direct download buttons for MIDI & WAV in Google Colab.
     """
     try:
         import base64
         from IPython.display import display, Audio, HTML
         print(f"--- Playing: {title} ---")
         
+        if composer or piece:
+            meta_card = (
+                f'<div style="padding:10px 14px; background:#1F2937; color:#F9FAFB; border-radius:6px; margin-bottom:10px; font-family:sans-serif;">'
+                f'<b style="color:#60A5FA;">🎼 Piece Metadata:</b> <b>{composer or "Unknown Composer"}</b> — <i>{piece or "Unknown Piece"}</i>'
+                f'</div>'
+            )
+            display(HTML(meta_card))
+
         wav_path = render_midi_to_wav(wav_or_midi_path)
         if wav_path and os.path.exists(wav_path):
             display(Audio(wav_path, rate=22050))
