@@ -47,19 +47,37 @@ def infer_performance(score_path: str, checkpoint_path: str = None, model_type: 
     if not os.path.exists(target_score):
         found = False
         search_roots = ["./data", "data", "/content/tenuto/data"]
+        
+        # Priority 1: Search for real score / MIDI files (.musicxml, .xml, .mxl, .mid, .midi)
         for sroot in search_roots:
             if os.path.exists(sroot):
                 for root, _, files in os.walk(sroot):
                     for f in files:
-                        if f.lower().endswith(('.xml', '.mxl', '.musicxml', '.mid', '.midi', '.pt')):
+                        if f.lower().endswith(('.xml', '.mxl', '.musicxml', '.mid', '.midi')):
                             target_score = os.path.join(root, f)
-                            print(f"[Tenuto Inference] Score '{score_path}' not found. Using dataset file '{target_score}'.")
+                            print(f"[Tenuto Inference] Score '{score_path}' not found. Using dataset score file '{target_score}'.")
                             found = True
                             break
                     if found:
                         break
             if found:
                 break
+                
+        # Priority 2: Fallback to preprocessed .pt files if no raw score/MIDI exists
+        if not found:
+            for sroot in search_roots:
+                if os.path.exists(sroot):
+                    for root, _, files in os.walk(sroot):
+                        for f in files:
+                            if f.lower().endswith('.pt'):
+                                target_score = os.path.join(root, f)
+                                print(f"[Tenuto Inference] Score '{score_path}' not found. Using preprocessed tensor file '{target_score}'.")
+                                found = True
+                                break
+                        if found:
+                            break
+                if found:
+                    break
 
     # 1. Extract 40D Features
     features = None
@@ -204,23 +222,31 @@ def infer_performance(score_path: str, checkpoint_path: str = None, model_type: 
             print(f"[Tenuto Inference] Partitura note loading note: {e}.")
 
     if score_notes is None:
-        print("[Tenuto Inference] Reconstructing note sequence from feature matrix (max 256 notes)...")
+        print("[Tenuto Inference] Reconstructing polyphonic note sequence from feature matrix...")
         num_notes = min(features.size(0), 256)
         score_notes = []
         curr_onset = 0.0
+        
         for i in range(num_notes):
             raw_pitch = float(features[i, 0].item()) * 127.0 if features.size(1) > 0 else 60.0
             pitch = int(np.clip(round(raw_pitch), 21, 108)) if raw_pitch > 10 else int(60 + (i % 12))
             
             raw_dur = float(features[i, 15].item()) * 4.0 if features.size(1) > 15 else 0.5
-            dur_sec = max(0.15, raw_dur * 0.5) if raw_dur > 0 else 0.25
+            dur_sec = max(0.2, raw_dur * 0.5)
+            
+            # Polyphony / chord size detection from feature index 37
+            chord_size = int(round(float(features[i, 37].item()) * 10.0)) if features.size(1) > 37 else 1
+            chord_size = max(1, min(chord_size, 4))
             
             score_notes.append({
                 "pitch": pitch,
                 "onset_sec": curr_onset,
                 "duration_sec": dur_sec
             })
-            curr_onset += 0.35
+            
+            # Group notes in chords together, advance onset at lively musical tempo (0.14s per step)
+            if (i + 1) % chord_size == 0:
+                curr_onset += 0.14
 
     # Clip predictions to match score_notes length (prevents endless audio rendering)
     num_notes = len(score_notes)
